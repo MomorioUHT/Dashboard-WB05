@@ -94,6 +94,7 @@
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/choices.js/public/assets/styles/choices.min.css" />
     <script src="https://cdn.jsdelivr.net/npm/choices.js/public/assets/scripts/choices.min.js"></script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
@@ -161,10 +162,25 @@
         Chart.register(ChartDataLabels);
         Chart.defaults.plugins.datalabels.display = false;
 
-        const sheetId = ENV.SHEET_ID;
-        const sheetName = ENV.SHEET_NAME;
+        const password = prompt("🔒 กรุณาใส่รหัสผ่านเพื่อเข้าดูแดชบอร์ด:");
+        let sheetId, sheetName;
+        
+        try {
+            if (!password) throw new Error("ไม่ได้ระบุรหัสผ่าน");
+            
+            // Decrypt the credentials using the provided password
+            sheetId = CryptoJS.AES.decrypt(ENV.ENCRYPTED_SHEET_ID, password).toString(CryptoJS.enc.Utf8);
+            sheetName = CryptoJS.AES.decrypt(ENV.ENCRYPTED_SHEET_NAME, password).toString(CryptoJS.enc.Utf8);
+            
+            if (!sheetId || !sheetName) throw new Error("รหัสผ่านไม่ถูกต้อง");
+        } catch (e) {
+            document.body.innerHTML = `<div style="display: flex; justify-content: center; align-items: center; height: 100vh; font-family: sans-serif; background-color: #fff;">
+                <h2 style="color: red; margin: 0;">❌ เข้าถึงข้อมูลไม่ได้ (รหัสผ่านผิด)</h2>
+            </div>`;
+            throw new Error("Unauthorized"); // Stop script execution
+        }
 
-        const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=${sheetName}`;
+        const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}`;
 
         let globalData = [];
         let choicesInstances = {};
