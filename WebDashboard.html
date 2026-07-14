@@ -1,0 +1,741 @@
+<!DOCTYPE html>
+<html lang="th">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Google Sheet Time Series Dashboard</title>
+    <!-- CSS ง่ายๆ เพื่อความสวยงาม -->
+    <style>
+        /* Spinner */
+        .spinner-container {
+            text-align: center;
+            padding: 40px 0;
+        }
+
+        .spinner {
+            border: 4px solid rgba(0, 0, 0, 0.1);
+            border-top: 4px solid #3498db;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 10px auto;
+        }
+
+        @keyframes spin {
+            0% {
+                transform: rotate(0deg);
+            }
+
+            100% {
+                transform: rotate(360deg);
+            }
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            padding: 20px;
+            background-color: #f0f2f5;
+        }
+
+        .dashboard-card {
+            background: #ffffff;
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.1);
+            margin-bottom: 20px;
+        }
+
+        h2 {
+            margin-top: 0;
+            color: #333;
+        }
+
+        /* Filter Section Styles */
+        .filter-section {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 15px;
+            margin-bottom: 20px;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-radius: 8px;
+            border: 1px solid #e9ecef;
+        }
+
+        .filter-group {
+            flex: 1;
+            min-width: 250px;
+            display: flex;
+            flex-direction: column;
+        }
+
+        .filter-group label {
+            font-size: 14px;
+            font-weight: 600;
+            margin-bottom: 5px;
+            color: #495057;
+        }
+
+        #chart-wrapper {
+            position: relative;
+            height: 450px;
+            width: 100%;
+        }
+
+        #error-message {
+            color: red;
+            display: none;
+            margin-top: 10px;
+            font-weight: bold;
+        }
+    </style>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/choices.js/public/assets/styles/choices.min.css" />
+    <script src="https://cdn.jsdelivr.net/npm/choices.js/public/assets/scripts/choices.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+    <style>
+        #filter-daterange {
+            padding: 10px;
+            font-size: 14px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+            width: 100%;
+            box-sizing: border-box;
+            background-color: #fff;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="dashboard-card">
+        <h2>📊 รายงานผู้ชม (ผลรวมตามช่วงเวลา)</h2>
+
+        <!-- Filter Controls -->
+        <div class="filter-section">
+            <div class="filter-group">
+                <label>📅 ประเภทวัน (WKDAY / WKEND)</label>
+                <select id="filter-wkday" multiple></select>
+            </div>
+            <div class="filter-group">
+                <label>⏰ ช่วงเวลา (รายชั่วโมง)</label>
+                <select id="filter-hour" multiple></select>
+            </div>
+            <div class="filter-group">
+                <label>📺 รายการ</label>
+                <select id="filter-program" multiple></select>
+            </div>
+            <div class="filter-group">
+                <label>🗓️ ช่วงวันที่ (Date Range)</label>
+                <input type="text" id="filter-daterange" placeholder="ทั้งหมด (คลิกเพื่อระบุช่วงเวลา)">
+            </div>
+        </div>
+
+        <!-- Loading Spinner -->
+        <div id="loading-spinner" class="spinner-container">
+            <div class="spinner"></div>
+            <p>กำลังโหลดและประมวลผลข้อมูล...</p>
+        </div>
+
+        <!-- The Main Canvas -->
+        <div id="chart-wrapper">
+            <canvas id="timeSeriesChartHourly"></canvas>
+        </div>
+        <div id="chart-wrapper">
+            <canvas id="timeSeriesChartDaily"></canvas>
+        </div>
+        <div id="chart-wrapper">
+            <canvas id="totalViewerChartDaily"></canvas>
+        </div>
+        <div id="error-message"></div>
+    </div>
+
+    <script src="environment.js"></script>
+    <script>
+        // Register datalabels but disable globally so it doesn't affect other charts
+        Chart.register(ChartDataLabels);
+        Chart.defaults.plugins.datalabels.display = false;
+
+        const sheetId = ENV.SHEET_ID;
+        const sheetName = ENV.SHEET_NAME;
+
+        const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=${sheetName}`;
+
+        let globalData = [];
+        let choicesInstances = {};
+        let fpInstance = null;
+
+        fetch(url)
+            .then(response => response.text())
+            .then(text => {
+                const jsonString = text.match(/google\.visualization\.Query\.setResponse\(([\s\S\w]+)\);/)[1];
+                const safeJsonString = jsonString.replace(/new Date\((.*?)\)/g, '"Date($1)"');
+                const data = JSON.parse(safeJsonString);
+
+                if (data.table) {
+                    preprocessingData(data.table);
+                }
+            })
+            .catch(error => {
+                console.error('Error:', error);
+                document.getElementById('loading-spinner').style.display = 'none';
+                document.getElementById('error-message').innerText = 'เกิดข้อผิดพลาดในการโหลดข้อมูล ตรวจสอบ Sheet ID และการตั้งค่า Public';
+                document.getElementById('error-message').style.display = 'block';
+                alert('เกิดข้อผิดพลาดในการโหลดข้อมูล: โปรดตรวจสอบ Sheet ID หรือสิทธิ์การเข้าถึงไฟล์');
+            });
+
+        function preprocessingData(table) {
+            let dateColIdx = -1;
+            let timeStrColIdx = -1;
+            let valColIdx = -1;
+            let valReachColIdx = -1;
+
+            let wkdayColIdx = -1;
+            let programColIdx = -1;
+
+            table.cols.forEach((col, idx) => {
+                if (col.label === 'DD/MM/YYYY') dateColIdx = idx;
+                if (col.label === 'Time') timeStrColIdx = idx;
+                if (col.label === 'จำนวนเครื่องรับชมสะสม10นาที') valColIdx = idx;
+                if (col.label === 'จำนวนเครื่องรวม(เข้าถึง)') valReachColIdx = idx;
+
+                if (col.label === 'WKDAY / WKEND') wkdayColIdx = idx;
+                if (col.label === 'รายการ') programColIdx = idx;
+            });
+
+            // Fallback
+            if (dateColIdx === -1) dateColIdx = 4;
+            if (timeStrColIdx === -1) timeStrColIdx = 10;
+            if (valColIdx === -1) valColIdx = 11;
+            if (valReachColIdx === -1) valReachColIdx = 12;
+            if (wkdayColIdx === -1) wkdayColIdx = 2;
+            if (programColIdx === -1) programColIdx = 5;
+
+            const processedData = [];
+
+            table.rows.forEach(row => {
+                const dateCell = row.c[dateColIdx];
+                const timeStrCell = row.c[timeStrColIdx];
+                const valCell = row.c[valColIdx];
+                const valReachCell = row.c[valReachColIdx];
+
+                const wkdayCell = row.c[wkdayColIdx];
+                const programCell = row.c[programColIdx];
+
+                if (valCell && valCell.v != null) {
+                    let hourLabel = "Unknown";
+                    let timeInterval = "Unknown";
+                    let sortKey = 0;
+
+                    let dateLabel = "Unknown";
+                    let dateSortKey = 0;
+
+                    // Date
+                    if (dateCell && typeof dateCell.v === 'string') {
+                        const dMatch = dateCell.v.match(/Date\((\d+),(\d+),(\d+)/);
+                        if (dMatch) {
+                            const yyyy = parseInt(dMatch[1], 10);
+                            const mm = parseInt(dMatch[2], 10);
+                            const dd = parseInt(dMatch[3], 10);
+                            dateLabel = `${dd.toString().padStart(2, '0')}/${(mm + 1).toString().padStart(2, '0')}/${yyyy}`;
+                            dateSortKey = new Date(yyyy, mm, dd).getTime();
+                        } else {
+                            dateLabel = dateCell.f || dateCell.v;
+                        }
+                    }
+
+                    // Time
+                    if (timeStrCell && typeof timeStrCell.v === 'string') {
+                        const tMatch = timeStrCell.v.match(/^(\d{2}):(\d{2}):\d{2}-(\d{2}):(\d{2}):\d{2}/);
+                        if (tMatch) {
+                            timeInterval = `${tMatch[1]}.${tMatch[2]}-${tMatch[3]}.${tMatch[4]}`;
+
+                            const hr = tMatch[1];
+                            const nextHr = hr === "23" ? "00" : (parseInt(hr, 10) + 1).toString().padStart(2, '0');
+                            hourLabel = `${hr}.00-${nextHr}.00 น.`;
+
+                            sortKey = parseInt(tMatch[1], 10) * 60 + parseInt(tMatch[2], 10);
+                        } else {
+                            timeInterval = timeStrCell.v;
+                        }
+                    }
+
+                    processedData.push({
+                        y: valCell.v,
+                        reach: valReachCell ? valReachCell.v : null,
+
+                        wkday: wkdayCell ? (wkdayCell.f || wkdayCell.v) : 'Unknown',
+                        program: programCell ? (programCell.f || programCell.v) : 'Unknown',
+                        hour: hourLabel,
+
+                        time_interval: timeInterval,
+                        sortKey: sortKey,
+
+                        date: dateLabel,
+                        dateSortKey: dateSortKey
+                    });
+                }
+            });
+
+            globalData = processedData;
+
+            document.getElementById('loading-spinner').style.display = 'none';
+
+            initFilters();
+            applyFilters();
+        }
+
+        function initFilters() {
+            // To make unique values
+            const wkdaySet = new Set();
+            const hourSet = new Set();
+            const programSet = new Set();
+
+            globalData.forEach(d => {
+                if (d.wkday && d.wkday !== 'Unknown') wkdaySet.add(String(d.wkday));
+                if (d.hour && d.hour !== 'Unknown') hourSet.add(String(d.hour));
+                if (d.program && d.program !== 'Unknown') programSet.add(String(d.program));
+            });
+
+            const mapToChoices = (set) => Array.from(set).sort().map(v => ({ value: v, label: v }));
+
+            const wkdayOptions = mapToChoices(wkdaySet);
+            const hourOptions = Array.from(hourSet).sort().map(v => ({ value: v, label: v }));
+            const programOptions = mapToChoices(programSet);
+
+            const commonConfig = {
+                removeItemButton: true,
+                placeholderValue: 'เลือกทั้งหมด (หากไม่เลือกใดๆ)',
+                searchPlaceholderValue: 'ค้นหา...',
+                shouldSort: false
+            };
+
+            if (choicesInstances.wkday) choicesInstances.wkday.destroy();
+            choicesInstances.wkday = new Choices('#filter-wkday', { ...commonConfig, searchEnabled: false });
+            choicesInstances.wkday.setChoices(wkdayOptions, 'value', 'label', true);
+
+            if (choicesInstances.hour) choicesInstances.hour.destroy();
+            choicesInstances.hour = new Choices('#filter-hour', commonConfig);
+            choicesInstances.hour.setChoices(hourOptions, 'value', 'label', true);
+
+            if (choicesInstances.program) choicesInstances.program.destroy();
+            choicesInstances.program = new Choices('#filter-program', commonConfig);
+            choicesInstances.program.setChoices(programOptions, 'value', 'label', true);
+
+            if (fpInstance) fpInstance.destroy();
+            fpInstance = flatpickr("#filter-daterange", {
+                mode: "range",
+                dateFormat: "d/m/Y",
+                onChange: function (selectedDates, dateStr, instance) {
+                    // Trigger filter only if 2 dates are selected or cleared
+                    if (selectedDates.length === 2 || selectedDates.length === 0) {
+                        applyFilters();
+                    }
+                }
+            });
+
+            // If dropdown changes, applyFilter
+            document.getElementById('filter-wkday').addEventListener('change', applyFilters);
+            document.getElementById('filter-hour').addEventListener('change', applyFilters);
+            document.getElementById('filter-program').addEventListener('change', applyFilters);
+        }
+
+        function applyFilters() {
+            const selectedWkdays = choicesInstances.wkday.getValue(true);
+            const selectedHours = choicesInstances.hour.getValue(true);
+            const selectedPrograms = choicesInstances.program.getValue(true);
+
+            const selectedDates = fpInstance ? fpInstance.selectedDates : [];
+            let startDate = null;
+            let endDate = null;
+            if (selectedDates.length === 2) {
+                // Ensure time is set at start and end of day
+                startDate = new Date(selectedDates[0]).setHours(0, 0, 0, 0);
+                endDate = new Date(selectedDates[1]).setHours(23, 59, 59, 999);
+            }
+
+            const filteredData = globalData.filter(d => {
+                const passWkday = selectedWkdays.length === 0 || selectedWkdays.includes(String(d.wkday));
+                const passHour = selectedHours.length === 0 || selectedHours.includes(String(d.hour));
+                const passProgram = selectedPrograms.length === 0 || selectedPrograms.includes(String(d.program));
+
+                let passDate = true;
+                if (startDate && endDate) {
+                    passDate = d.dateSortKey >= startDate && d.dateSortKey <= endDate;
+                }
+
+                return passWkday && passHour && passProgram && passDate;
+            });
+
+            // 1. Hourly Aggregation
+            const aggregatedHourly = {};
+            filteredData.forEach(d => {
+                const key = d.time_interval;
+                if (!aggregatedHourly[key]) {
+                    aggregatedHourly[key] = { label: key, sortKey: d.sortKey, y: 0, reach: 0 };
+                }
+                aggregatedHourly[key].y += (d.y || 0);
+                aggregatedHourly[key].reach += (d.reach || 0);
+            });
+            const hourlyData = Object.values(aggregatedHourly);
+            hourlyData.sort((a, b) => a.sortKey - b.sortKey);
+            renderTimeSeriesChartHourly(hourlyData);
+
+            // 2. Daily Aggregation
+            const aggregatedDaily = {};
+            filteredData.forEach(d => {
+                const key = d.date;
+                if (!aggregatedDaily[key]) {
+                    aggregatedDaily[key] = { label: key, sortKey: d.dateSortKey, y: 0, reach: 0 };
+                }
+                aggregatedDaily[key].y += (d.y || 0);
+                aggregatedDaily[key].reach += (d.reach || 0);
+            });
+            const dailyData = Object.values(aggregatedDaily);
+            dailyData.sort((a, b) => a.sortKey - b.sortKey);
+            renderTimeSeriesChartDaily(dailyData);
+
+            // 3. Program Daily Aggregation (Stacked Bar)
+            const totalViewerCanvas = document.getElementById('totalViewerChartDaily');
+            if (selectedPrograms.length > 0) {
+                totalViewerCanvas.parentElement.style.display = 'block';
+
+                const aggregatedProgramDaily = {};
+                const uniqueDatesMap = new Map();
+                const uniquePrograms = new Set();
+
+                filteredData.forEach(d => {
+                    if (!uniqueDatesMap.has(d.date)) {
+                        uniqueDatesMap.set(d.date, d.dateSortKey);
+                    }
+                    uniquePrograms.add(d.program);
+                    const key = `${d.date}_${d.program}`;
+                    if (!aggregatedProgramDaily[key]) {
+                        aggregatedProgramDaily[key] = 0;
+                    }
+                    // เลือกแสดงเฉพาะยอดวิวสะสม 10 นาที (d.y) เป็นตัวแทนของยอดวิวรายการ
+                    aggregatedProgramDaily[key] += (d.y || 0);
+                });
+
+                const sortedDates = Array.from(uniqueDatesMap.keys()).sort((a, b) => {
+                    return uniqueDatesMap.get(a) - uniqueDatesMap.get(b);
+                });
+                const programs = Array.from(uniquePrograms).sort();
+
+                const datasetsProgramDaily = programs.map((prog, index) => {
+                    const hue = (index * 137.5) % 360;
+                    const color = `hsl(${hue}, 70%, 50%)`;
+                    const bgColor = `hsla(${hue}, 70%, 50%, 0.7)`;
+
+                    const data = sortedDates.map(date => {
+                        const key = `${date}_${prog}`;
+                        return aggregatedProgramDaily[key] || 0;
+                    });
+
+                    return {
+                        label: prog,
+                        data: data,
+                        backgroundColor: bgColor,
+                        borderColor: color,
+                        borderWidth: 1
+                    };
+                });
+
+                renderTotalViewerChartDaily(sortedDates, datasetsProgramDaily);
+            } else {
+                totalViewerCanvas.parentElement.style.display = 'none';
+                if (chartTotalViewerDailyInstance) {
+                    chartTotalViewerDailyInstance.destroy();
+                    chartTotalViewerDailyInstance = null;
+                }
+            }
+        }
+
+        let chartHourlyInstance = null;
+        let chartDailyInstance = null;
+        let chartTotalViewerDailyInstance = null;
+
+        function renderTimeSeriesChartHourly(dataPoints) {
+            const ctx = document.getElementById('timeSeriesChartHourly').getContext('2d');
+
+            if (chartHourlyInstance) {
+                chartHourlyInstance.destroy();
+            }
+
+            chartHourlyInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: dataPoints.map(d => d.label),
+                    datasets: [
+                        {
+                            label: 'ผลรวมจำนวนเครื่องรับชมสะสม 10 นาที (รายช่วงเวลา)',
+                            data: dataPoints.map(d => d.y),
+                            borderColor: '#4CAF50',
+                            backgroundColor: 'rgba(76, 175, 80, 0.2)',
+                            borderWidth: 2,
+                            tension: 0.3,
+                            fill: true,
+                            pointRadius: 2,
+                            pointHoverRadius: 6
+                        },
+                        {
+                            label: 'ผลรวมจำนวนเครื่องรวมที่เข้าถึง (รายช่วงเวลา)',
+                            data: dataPoints.map(d => d.reach),
+                            borderColor: '#2196F3',
+                            backgroundColor: 'rgba(33, 150, 243, 0.2)',
+                            borderWidth: 2,
+                            tension: 0.3,
+                            fill: false,
+                            pointRadius: 2,
+                            pointHoverRadius: 6
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false,
+                    },
+                    scales: {
+                        x: {
+                            type: 'category',
+                            title: {
+                                display: true,
+                                text: 'ช่วงเวลา (Time Interval)'
+                            },
+                            grid: {
+                                display: false
+                            }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'ผลรวมจำนวนผู้ชม (Sum)'
+                            }
+                        }
+                    },
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'จำนวนเครื่องรับชมสะสม10นาที:รายนาที',
+                            font: { size: 16 }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function (context) {
+                                    let label = context.dataset.label || '';
+                                    if (label) {
+                                        label += ': ';
+                                    }
+                                    if (context.parsed.y !== null) {
+                                        label += context.parsed.y.toLocaleString();
+                                    }
+                                    return label;
+                                }
+                            }
+                        },
+                        legend: {
+                            position: 'top',
+                            labels: {
+                                usePointStyle: true,
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function renderTimeSeriesChartDaily(dataPoints) {
+            const ctx = document.getElementById('timeSeriesChartDaily').getContext('2d');
+
+            if (chartDailyInstance) {
+                chartDailyInstance.destroy();
+            }
+
+            chartDailyInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: dataPoints.map(d => d.label),
+                    datasets: [
+                        {
+                            label: 'ผลรวมจำนวนเครื่องรับชมสะสม 10 นาที (รายวัน)',
+                            data: dataPoints.map(d => d.y),
+                            borderColor: '#FF9800',
+                            backgroundColor: 'rgba(255, 152, 0, 0.2)',
+                            borderWidth: 2,
+                            tension: 0.3,
+                            fill: true,
+                            pointRadius: 3,
+                            pointHoverRadius: 6
+                        },
+                        {
+                            label: 'ผลรวมจำนวนเครื่องรวมที่เข้าถึง (รายวัน)',
+                            data: dataPoints.map(d => d.reach),
+                            borderColor: '#9C27B0',
+                            backgroundColor: 'rgba(156, 39, 176, 0.2)',
+                            borderWidth: 2,
+                            tension: 0.3,
+                            fill: false,
+                            pointRadius: 3,
+                            pointHoverRadius: 6
+                        }
+                    ]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false,
+                    },
+                    scales: {
+                        x: {
+                            type: 'category',
+                            title: {
+                                display: true,
+                                text: 'วันที่ (Date)'
+                            },
+                            grid: {
+                                display: false
+                            }
+                        },
+                        y: {
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'ผลรวมจำนวนผู้ชม (Sum)'
+                            }
+                        }
+                    },
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'จำนวนเครื่องรับชมสะสม10นาที:รายวัน',
+                            font: { size: 16 }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function (context) {
+                                    let label = context.dataset.label || '';
+                                    if (label) {
+                                        label += ': ';
+                                    }
+                                    if (context.parsed.y !== null) {
+                                        label += context.parsed.y.toLocaleString();
+                                    }
+                                    return label;
+                                }
+                            }
+                        },
+                        legend: {
+                            position: 'top',
+                            labels: {
+                                usePointStyle: true,
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+        function renderTotalViewerChartDaily(labels, datasets) {
+            const ctx = document.getElementById('totalViewerChartDaily').getContext('2d');
+
+            if (chartTotalViewerDailyInstance) {
+                chartTotalViewerDailyInstance.destroy();
+            }
+
+            chartTotalViewerDailyInstance = new Chart(ctx, {
+                type: 'bar',
+                data: {
+                    labels: labels,
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false,
+                    },
+                    scales: {
+                        x: {
+                            stacked: true,
+                            title: {
+                                display: true,
+                                text: 'วันที่ (Date)'
+                            },
+                            grid: {
+                                display: false
+                            }
+                        },
+                        y: {
+                            stacked: true,
+                            beginAtZero: true,
+                            title: {
+                                display: true,
+                                text: 'ผลรวมยอดวิว (Sum)'
+                            }
+                        }
+                    },
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'สัดส่วนยอดวิวสะสม10นาทีของแต่ละรายการ:รายวัน',
+                            font: { size: 16 }
+                        },
+                        tooltip: {
+                            // Filter out 0 value items to prevent huge tooltip and lag
+                            filter: function (tooltipItem) {
+                                return tooltipItem.parsed.y > 0;
+                            },
+                            callbacks: {
+                                label: function (context) {
+                                    let label = context.dataset.label || '';
+                                    if (label) {
+                                        label += ': ';
+                                    }
+                                    if (context.parsed.y !== null) {
+                                        label += context.parsed.y.toLocaleString();
+                                    }
+                                    return label;
+                                }
+                            }
+                        },
+                        legend: {
+                            position: 'top',
+                            labels: {
+                                usePointStyle: true,
+                            }
+                        },
+                        datalabels: {
+                            display: function (context) {
+                                return context.dataset.data[context.dataIndex] > 0;
+                            },
+                            color: '#fff',
+                            font: {
+                                weight: 'bold'
+                            },
+                            textStrokeColor: 'rgba(0,0,0,0.5)',
+                            textStrokeWidth: 2,
+                            formatter: function (value) {
+                                return value.toLocaleString();
+                            }
+                        }
+                    }
+                }
+            });
+        }
+
+    </script>
+</body>
+
+</html>
