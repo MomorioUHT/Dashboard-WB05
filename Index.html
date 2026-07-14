@@ -164,14 +164,14 @@
 
         const password = prompt("🔒 กรุณาใส่รหัสผ่านเพื่อเข้าดูแดชบอร์ด:");
         let sheetId, sheetName;
-        
+
         try {
             if (!password) throw new Error("ไม่ได้ระบุรหัสผ่าน");
-            
+
             // Decrypt the credentials using the provided password
             sheetId = CryptoJS.AES.decrypt(ENV.ENCRYPTED_SHEET_ID, password).toString(CryptoJS.enc.Utf8);
             sheetName = CryptoJS.AES.decrypt(ENV.ENCRYPTED_SHEET_NAME, password).toString(CryptoJS.enc.Utf8);
-            
+
             if (!sheetId || !sheetName) throw new Error("รหัสผ่านไม่ถูกต้อง");
         } catch (e) {
             document.body.innerHTML = `<div style="display: flex; justify-content: center; align-items: center; height: 100vh; font-family: sans-serif; background-color: #fff;">
