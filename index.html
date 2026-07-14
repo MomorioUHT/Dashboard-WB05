@@ -153,6 +153,14 @@
                 <label>🗓️ ช่วงวันที่ (Date Range)</label>
                 <input type="text" id="filter-daterange" placeholder="ทั้งหมด (คลิกเพื่อระบุช่วงเวลา)">
             </div>
+            <div class="filter-group">
+                <label>📊 ความละเอียดกราฟ (Timeframe)</label>
+                <select id="chart-timeframe">
+                    <option value="10min">ราย 10 นาที (10 Minutes)</option>
+                    <option value="hourly">รายชั่วโมง (Hourly)</option>
+                    <option value="daily">รายวัน (Daily)</option>
+                </select>
+            </div>
         </div>
 
         <!-- Loading Spinner -->
@@ -160,8 +168,15 @@
             <div class="spinner"></div>
             <p>กำลังโหลดและประมวลผลข้อมูล...</p>
         </div>
+        <div id="error-message"></div>
 
         <!-- The Main Canvas -->
+        <div id="chart-wrapper">
+            <canvas id="mainTimeSeriesChart"></canvas>
+        </div>
+        <div id="chart-wrapper">
+            <canvas id="totalViewerChartDaily"></canvas>
+        </div>
         <div class="chart-row">
             <div class="chart-col">
                 <canvas id="categoryPieChart"></canvas>
@@ -170,18 +185,6 @@
                 <canvas id="agencyBarChart"></canvas>
             </div>
         </div>
-
-        <div id="chart-wrapper">
-            <canvas id="timeSeriesChartHourly"></canvas>
-        </div>
-        <div id="chart-wrapper">
-            <canvas id="timeSeriesChartDaily"></canvas>
-        </div>
-        <div id="chart-wrapper">
-            <canvas id="totalViewerChartDaily"></canvas>
-        </div>
-
-        <div id="error-message"></div>
     </div>
 
     <script src="environment.js"></script>
@@ -213,6 +216,14 @@
         let globalData = [];
         let choicesInstances = {};
         let fpInstance = null;
+
+        // Initialize timeframe dropdown immediately so CSS applies while loading
+        choicesInstances.timeframe = new Choices('#chart-timeframe', {
+            searchEnabled: false,
+            itemSelectText: '',
+            shouldSort: false
+        });
+        document.getElementById('chart-timeframe').addEventListener('change', applyFilters);
 
         fetch(url)
             .then(response => response.text())
@@ -342,6 +353,9 @@
 
             initFilters();
             applyFilters();
+
+            // เลื่อนหน้าจอกลับขึ้นไปด้านบนสุดเมื่อโหลดข้อมูลเสร็จ
+            window.scrollTo({ top: 0, behavior: 'smooth' });
         }
 
         function initFilters() {
@@ -426,33 +440,38 @@
                 return passWkday && passHour && passProgram && passDate;
             });
 
-            // 1. Hourly Aggregation
-            const aggregatedHourly = {};
-            filteredData.forEach(d => {
-                const key = d.time_interval;
-                if (!aggregatedHourly[key]) {
-                    aggregatedHourly[key] = { label: key, sortKey: d.sortKey, y: 0, reach: 0 };
-                }
-                aggregatedHourly[key].y += (d.y || 0);
-                aggregatedHourly[key].reach += (d.reach || 0);
-            });
-            const hourlyData = Object.values(aggregatedHourly);
-            hourlyData.sort((a, b) => a.sortKey - b.sortKey);
-            renderTimeSeriesChartHourly(hourlyData);
+            // 1 & 2. Main Time Series Aggregation (Dynamic)
+            const timeframe = document.getElementById('chart-timeframe').value;
+            const aggregatedMain = {};
+            let chartTitle = '';
 
-            // 2. Daily Aggregation
-            const aggregatedDaily = {};
             filteredData.forEach(d => {
-                const key = d.date;
-                if (!aggregatedDaily[key]) {
-                    aggregatedDaily[key] = { label: key, sortKey: d.dateSortKey, y: 0, reach: 0 };
+                let key, sortKey;
+                if (timeframe === '10min') {
+                    key = d.time_interval;
+                    sortKey = d.sortKey;
+                } else if (timeframe === 'hourly') {
+                    key = d.hour;
+                    sortKey = d.sortKey; // Use chronological sortKey of the first interval in that hour
+                } else if (timeframe === 'daily') {
+                    key = d.date;
+                    sortKey = d.dateSortKey;
                 }
-                aggregatedDaily[key].y += (d.y || 0);
-                aggregatedDaily[key].reach += (d.reach || 0);
+
+                if (!aggregatedMain[key]) {
+                    aggregatedMain[key] = { label: key, sortKey: sortKey, y: 0, reach: 0 };
+                }
+                aggregatedMain[key].y += (d.y || 0);
+                aggregatedMain[key].reach += (d.reach || 0);
             });
-            const dailyData = Object.values(aggregatedDaily);
-            dailyData.sort((a, b) => a.sortKey - b.sortKey);
-            renderTimeSeriesChartDaily(dailyData);
+
+            if (timeframe === '10min') chartTitle = 'จำนวนเครื่องรับชมสะสม10นาที และ จำนวนเครื่องรวม(เข้าถึง): ราย 10 นาที';
+            else if (timeframe === 'hourly') chartTitle = 'จำนวนเครื่องรับชมสะสม10นาที และ จำนวนเครื่องรวม(เข้าถึง): รายชั่วโมง';
+            else if (timeframe === 'daily') chartTitle = 'จำนวนเครื่องรับชมสะสม10นาที และ จำนวนเครื่องรวม(เข้าถึง): รายวัน';
+
+            const mainData = Object.values(aggregatedMain);
+            mainData.sort((a, b) => a.sortKey - b.sortKey);
+            renderMainTimeSeriesChart(mainData, chartTitle);
 
             // 3. Program Daily Aggregation (Stacked Bar)
             const totalViewerCanvas = document.getElementById('totalViewerChartDaily');
@@ -538,26 +557,25 @@
             renderAgencyBarChart(agencyLabels, agencyData);
         }
 
-        let chartHourlyInstance = null;
-        let chartDailyInstance = null;
+        let chartMainInstance = null;
         let chartTotalViewerDailyInstance = null;
         let chartCategoryInstance = null;
         let chartAgencyInstance = null;
 
-        function renderTimeSeriesChartHourly(dataPoints) {
-            const ctx = document.getElementById('timeSeriesChartHourly').getContext('2d');
+        function renderMainTimeSeriesChart(dataPoints, chartTitle) {
+            const ctx = document.getElementById('mainTimeSeriesChart').getContext('2d');
 
-            if (chartHourlyInstance) {
-                chartHourlyInstance.destroy();
+            if (chartMainInstance) {
+                chartMainInstance.destroy();
             }
 
-            chartHourlyInstance = new Chart(ctx, {
+            chartMainInstance = new Chart(ctx, {
                 type: 'line',
                 data: {
                     labels: dataPoints.map(d => d.label),
                     datasets: [
                         {
-                            label: 'ผลรวมจำนวนเครื่องรับชมสะสม 10 นาที (รายช่วงเวลา)',
+                            label: 'ผลรวมจำนวนเครื่องรับชมสะสม 10 นาที',
                             data: dataPoints.map(d => d.y),
                             borderColor: '#4CAF50',
                             backgroundColor: 'rgba(76, 175, 80, 0.2)',
@@ -568,7 +586,7 @@
                             pointHoverRadius: 6
                         },
                         {
-                            label: 'ผลรวมจำนวนเครื่องรวมที่เข้าถึง (รายช่วงเวลา)',
+                            label: 'ผลรวมจำนวนเครื่องรวมที่เข้าถึง',
                             data: dataPoints.map(d => d.reach),
                             borderColor: '#2196F3',
                             backgroundColor: 'rgba(33, 150, 243, 0.2)',
@@ -592,7 +610,7 @@
                             type: 'category',
                             title: {
                                 display: true,
-                                text: 'ช่วงเวลา (Time Interval)'
+                                text: 'ช่วงเวลา / วันที่ (Timeframe)'
                             },
                             grid: {
                                 display: false
@@ -609,7 +627,7 @@
                     plugins: {
                         title: {
                             display: true,
-                            text: 'จำนวนเครื่องรับชมสะสม10นาที:รายนาที',
+                            text: chartTitle,
                             font: { size: 16 }
                         },
                         tooltip: {
@@ -637,98 +655,7 @@
             });
         }
 
-        function renderTimeSeriesChartDaily(dataPoints) {
-            const ctx = document.getElementById('timeSeriesChartDaily').getContext('2d');
 
-            if (chartDailyInstance) {
-                chartDailyInstance.destroy();
-            }
-
-            chartDailyInstance = new Chart(ctx, {
-                type: 'line',
-                data: {
-                    labels: dataPoints.map(d => d.label),
-                    datasets: [
-                        {
-                            label: 'ผลรวมจำนวนเครื่องรับชมสะสม 10 นาที (รายวัน)',
-                            data: dataPoints.map(d => d.y),
-                            borderColor: '#FF9800',
-                            backgroundColor: 'rgba(255, 152, 0, 0.2)',
-                            borderWidth: 2,
-                            tension: 0.3,
-                            fill: true,
-                            pointRadius: 3,
-                            pointHoverRadius: 6
-                        },
-                        {
-                            label: 'ผลรวมจำนวนเครื่องรวมที่เข้าถึง (รายวัน)',
-                            data: dataPoints.map(d => d.reach),
-                            borderColor: '#9C27B0',
-                            backgroundColor: 'rgba(156, 39, 176, 0.2)',
-                            borderWidth: 2,
-                            tension: 0.3,
-                            fill: false,
-                            pointRadius: 3,
-                            pointHoverRadius: 6
-                        }
-                    ]
-                },
-                options: {
-                    responsive: true,
-                    maintainAspectRatio: false,
-                    interaction: {
-                        mode: 'index',
-                        intersect: false,
-                    },
-                    scales: {
-                        x: {
-                            type: 'category',
-                            title: {
-                                display: true,
-                                text: 'วันที่ (Date)'
-                            },
-                            grid: {
-                                display: false
-                            }
-                        },
-                        y: {
-                            beginAtZero: true,
-                            title: {
-                                display: true,
-                                text: 'ผลรวมจำนวนผู้ชม (Sum)'
-                            }
-                        }
-                    },
-                    plugins: {
-                        title: {
-                            display: true,
-                            text: 'จำนวนเครื่องรับชมสะสม10นาที:รายวัน',
-                            font: { size: 16 }
-                        },
-                        tooltip: {
-                            callbacks: {
-                                label: function (context) {
-                                    let label = context.dataset.label || '';
-                                    if (label) {
-                                        label += ': ';
-                                    }
-                                    if (context.parsed.y !== null) {
-                                        label += context.parsed.y.toLocaleString();
-                                    }
-                                    return label;
-                                }
-                            }
-                        },
-                        legend: {
-                            position: 'top',
-                            labels: {
-                                usePointStyle: true,
-                            }
-                        }
-                    }
-                }
-            });
-        }
 
         function renderTotalViewerChartDaily(labels, datasets) {
             const ctx = document.getElementById('totalViewerChartDaily').getContext('2d');
@@ -845,7 +772,7 @@
                     plugins: {
                         title: {
                             display: true,
-                            text: 'สัดส่วนยอดวิวแยกตามประเภทรายการ',
+                            text: 'สัดส่วนยอดวิวรวมแยกตามประเภทรายการ',
                             font: { size: 16 }
                         },
                         datalabels: {
