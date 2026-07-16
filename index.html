@@ -127,27 +127,49 @@
             box-sizing: border-box;
             background-color: #fff;
         }
+
+        .flatpickr-day.has-data::after {
+            content: '';
+            position: absolute;
+            bottom: 4px;
+            left: 50%;
+            transform: translateX(-50%);
+            width: 5px;
+            height: 5px;
+            background-color: #4CAF50;
+            border-radius: 50%;
+        }
     </style>
 </head>
 
 <body>
 
-    <div class="dashboard-card">
+    <div id="full-page-loader"
+        style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background-color: #f0f2f5; display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 9999;">
+        <div class="spinner"></div>
+        <h3 style="color: #333; margin-top: 20px;">กำลังโหลดและประมวลผลข้อมูล...</h3>
+    </div>
+
+    <div class="dashboard-card" id="dashboard-content" style="display: none;">
         <h2>📊 รายงานผู้ชม (ผลรวมตามช่วงเวลา)</h2>
 
         <!-- Filter Controls -->
         <div class="filter-section">
             <div class="filter-group">
                 <label>📅 ประเภทวัน (WKDAY / WKEND)</label>
-                <select id="filter-wkday" multiple></select>
+                <select id="filter-wkday" multiple placeholder="เลือกทั้งหมด (หากไม่เลือกใดๆ)"></select>
+            </div>
+            <div class="filter-group">
+                <label>📅 วันในสัปดาห์</label>
+                <select id="filter-dayofweek" multiple placeholder="เลือกทั้งหมด (หากไม่เลือกใดๆ)"></select>
             </div>
             <div class="filter-group">
                 <label>⏰ ช่วงเวลา (รายชั่วโมง)</label>
-                <select id="filter-hour" multiple></select>
+                <select id="filter-hour" multiple placeholder="เลือกทั้งหมด (หากไม่เลือกใดๆ)"></select>
             </div>
             <div class="filter-group">
                 <label>📺 รายการ</label>
-                <select id="filter-program" multiple></select>
+                <select id="filter-program" multiple placeholder="เลือกทั้งหมด (หากไม่เลือกใดๆ)"></select>
             </div>
             <div class="filter-group">
                 <label>🗓️ ช่วงวันที่ (Date Range)</label>
@@ -163,11 +185,6 @@
             </div>
         </div>
 
-        <!-- Loading Spinner -->
-        <div id="loading-spinner" class="spinner-container">
-            <div class="spinner"></div>
-            <p>กำลังโหลดและประมวลผลข้อมูล...</p>
-        </div>
         <div id="error-message"></div>
 
         <!-- The Main Canvas -->
@@ -183,6 +200,12 @@
             </div>
             <div class="chart-col">
                 <canvas id="agencyBarChart"></canvas>
+            </div>
+        </div>
+
+        <div id="steppedChartContainer" style="display: none;">
+            <div id="chart-wrapper">
+                <canvas id="steppedTimeSeriesChart"></canvas>
             </div>
         </div>
     </div>
@@ -205,6 +228,7 @@
 
             if (!sheetId || !sheetName) throw new Error("รหัสผ่านไม่ถูกต้อง");
         } catch (e) {
+            document.getElementById('full-page-loader').style.display = 'none';
             document.body.innerHTML = `<div style="display: flex; justify-content: center; align-items: center; height: 100vh; font-family: sans-serif; background-color: #fff;">
                 <h2 style="color: red; margin: 0;">❌ เข้าถึงข้อมูลไม่ได้ (รหัสผ่านผิด)</h2>
             </div>`;
@@ -238,7 +262,8 @@
             })
             .catch(error => {
                 console.error('Error:', error);
-                document.getElementById('loading-spinner').style.display = 'none';
+                document.getElementById('full-page-loader').style.display = 'none';
+                document.getElementById('dashboard-content').style.display = 'block';
                 document.getElementById('error-message').innerText = 'เกิดข้อผิดพลาดในการโหลดข้อมูล ตรวจสอบ Sheet ID และการตั้งค่า Public';
                 document.getElementById('error-message').style.display = 'block';
                 alert('เกิดข้อผิดพลาดในการโหลดข้อมูล: โปรดตรวจสอบ Sheet ID หรือสิทธิ์การเข้าถึงไฟล์');
@@ -327,12 +352,18 @@
                             timeInterval = timeStrCell.v;
                         }
                     }
+                    let dayOfWeek = "Unknown";
+                    if (dateSortKey > 0) {
+                        const daysMap = ['อาทิตย์', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์'];
+                        dayOfWeek = daysMap[new Date(dateSortKey).getDay()];
+                    }
 
                     processedData.push({
                         y: valCell.v,
                         reach: valReachCell ? valReachCell.v : null,
 
                         wkday: wkdayCell ? (wkdayCell.f || wkdayCell.v) : 'Unknown',
+                        dayOfWeek: dayOfWeek,
                         program: programCell ? (programCell.f || programCell.v) : 'Unknown',
                         category: categoryCell ? (categoryCell.f || categoryCell.v) : 'Unknown',
                         agency: agencyCell ? (agencyCell.f || agencyCell.v) : 'Unknown',
@@ -349,7 +380,8 @@
 
             globalData = processedData;
 
-            document.getElementById('loading-spinner').style.display = 'none';
+            document.getElementById('full-page-loader').style.display = 'none';
+            document.getElementById('dashboard-content').style.display = 'block';
 
             initFilters();
             applyFilters();
@@ -361,18 +393,29 @@
         function initFilters() {
             // To make unique values
             const wkdaySet = new Set();
+            const dayOfWeekSet = new Set();
             const hourSet = new Set();
             const programSet = new Set();
 
             globalData.forEach(d => {
                 if (d.wkday && d.wkday !== 'Unknown') wkdaySet.add(String(d.wkday));
+                if (d.dayOfWeek && d.dayOfWeek !== 'Unknown') dayOfWeekSet.add(String(d.dayOfWeek));
                 if (d.hour && d.hour !== 'Unknown') hourSet.add(String(d.hour));
                 if (d.program && d.program !== 'Unknown') programSet.add(String(d.program));
             });
 
             const mapToChoices = (set) => Array.from(set).sort().map(v => ({ value: v, label: v }));
 
+            const mapToDayOfWeekChoices = (set) => {
+                const order = ['จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์', 'อาทิตย์'];
+                return Array.from(set)
+                    .map(v => ({ value: v, label: v, order: order.indexOf(v) }))
+                    .sort((a, b) => a.order - b.order)
+                    .map(v => ({ value: v.value, label: v.label }));
+            };
+
             const wkdayOptions = mapToChoices(wkdaySet);
+            const dayOfWeekOptions = mapToDayOfWeekChoices(dayOfWeekSet);
             const hourOptions = Array.from(hourSet).sort().map(v => ({ value: v, label: v }));
             const programOptions = mapToChoices(programSet);
 
@@ -380,12 +423,20 @@
                 removeItemButton: true,
                 placeholderValue: 'เลือกทั้งหมด (หากไม่เลือกใดๆ)',
                 searchPlaceholderValue: 'ค้นหา...',
-                shouldSort: false
+                shouldSort: false,
+                searchResultLimit: 100,
+                fuseOptions: {
+                    ignoreLocation: true
+                }
             };
 
             if (choicesInstances.wkday) choicesInstances.wkday.destroy();
-            choicesInstances.wkday = new Choices('#filter-wkday', { ...commonConfig, searchEnabled: false });
+            choicesInstances.wkday = new Choices('#filter-wkday', commonConfig);
             choicesInstances.wkday.setChoices(wkdayOptions, 'value', 'label', true);
+
+            if (choicesInstances.dayofweek) choicesInstances.dayofweek.destroy();
+            choicesInstances.dayofweek = new Choices('#filter-dayofweek', commonConfig);
+            choicesInstances.dayofweek.setChoices(dayOfWeekOptions, 'value', 'label', true);
 
             if (choicesInstances.hour) choicesInstances.hour.destroy();
             choicesInstances.hour = new Choices('#filter-hour', commonConfig);
@@ -395,10 +446,26 @@
             choicesInstances.program = new Choices('#filter-program', commonConfig);
             choicesInstances.program.setChoices(programOptions, 'value', 'label', true);
 
+            let minGlobalDate = Infinity;
+            let maxGlobalDate = -Infinity;
+            globalData.forEach(d => {
+                if (d.dateSortKey) {
+                    if (d.dateSortKey < minGlobalDate) minGlobalDate = d.dateSortKey;
+                    if (d.dateSortKey > maxGlobalDate) maxGlobalDate = d.dateSortKey;
+                }
+            });
+
             if (fpInstance) fpInstance.destroy();
             fpInstance = flatpickr("#filter-daterange", {
                 mode: "range",
                 dateFormat: "d/m/Y",
+                minDate: minGlobalDate !== Infinity ? new Date(minGlobalDate) : null,
+                maxDate: maxGlobalDate !== -Infinity ? new Date(maxGlobalDate) : null,
+                onDayCreate: function (dObj, dStr, fp, dayElem) {
+                    if (fp.allowedDates && fp.allowedDates.has(dayElem.dateObj.getTime())) {
+                        dayElem.classList.add("has-data");
+                    }
+                },
                 onChange: function (selectedDates, dateStr, instance) {
                     // Trigger filter only if 2 dates are selected or cleared
                     if (selectedDates.length === 2 || selectedDates.length === 0) {
@@ -406,15 +473,113 @@
                     }
                 }
             });
+            fpInstance.allowedDates = new Set();
 
             // If dropdown changes, applyFilter
             document.getElementById('filter-wkday').addEventListener('change', applyFilters);
+            document.getElementById('filter-dayofweek').addEventListener('change', applyFilters);
             document.getElementById('filter-hour').addEventListener('change', applyFilters);
             document.getElementById('filter-program').addEventListener('change', applyFilters);
         }
 
-        function applyFilters() {
+        function getFilteredOptions(excludeFilter) {
             const selectedWkdays = choicesInstances.wkday.getValue(true);
+            const selectedDayOfWeeks = choicesInstances.dayofweek.getValue(true);
+            const selectedHours = choicesInstances.hour.getValue(true);
+            const selectedPrograms = choicesInstances.program.getValue(true);
+
+            const selectedDates = fpInstance ? fpInstance.selectedDates : [];
+            let startDate = null;
+            let endDate = null;
+            if (selectedDates.length === 2) {
+                startDate = new Date(selectedDates[0]).setHours(0, 0, 0, 0);
+                endDate = new Date(selectedDates[1]).setHours(23, 59, 59, 999);
+            }
+
+            return globalData.filter(d => {
+                const passWkday = excludeFilter === 'wkday' || selectedWkdays.length === 0 || selectedWkdays.includes(String(d.wkday));
+                const passDayOfWeek = excludeFilter === 'dayofweek' || selectedDayOfWeeks.length === 0 || selectedDayOfWeeks.includes(String(d.dayOfWeek));
+                const passHour = excludeFilter === 'hour' || selectedHours.length === 0 || selectedHours.includes(String(d.hour));
+                const passProgram = excludeFilter === 'program' || selectedPrograms.length === 0 || selectedPrograms.includes(String(d.program));
+
+                let passDate = true;
+                if (excludeFilter !== 'date' && startDate && endDate) {
+                    passDate = d.dateSortKey >= startDate && d.dateSortKey <= endDate;
+                }
+
+                return passWkday && passDayOfWeek && passHour && passProgram && passDate;
+            });
+        }
+
+        function updateDropdownChoices() {
+            const dataForWkday = getFilteredOptions('wkday');
+            const wkdaySet = new Set();
+            dataForWkday.forEach(d => { if (d.wkday && d.wkday !== 'Unknown') wkdaySet.add(String(d.wkday)); });
+            const currentWkdays = choicesInstances.wkday.getValue(true);
+
+            const dataForDayOfWeek = getFilteredOptions('dayofweek');
+            const dayOfWeekSetDynamic = new Set();
+            dataForDayOfWeek.forEach(d => { if (d.dayOfWeek && d.dayOfWeek !== 'Unknown') dayOfWeekSetDynamic.add(String(d.dayOfWeek)); });
+            const currentDayOfWeeks = choicesInstances.dayofweek.getValue(true);
+
+            const dataForHour = getFilteredOptions('hour');
+            const hourSet = new Set();
+            dataForHour.forEach(d => { if (d.hour && d.hour !== 'Unknown') hourSet.add(String(d.hour)); });
+            const currentHours = choicesInstances.hour.getValue(true);
+
+            const dataForProgram = getFilteredOptions('program');
+            const programSet = new Set();
+            dataForProgram.forEach(d => { if (d.program && d.program !== 'Unknown') programSet.add(String(d.program)); });
+            const currentPrograms = choicesInstances.program.getValue(true);
+
+            const dataForDate = getFilteredOptions('date');
+            const allowedDates = new Set();
+            dataForDate.forEach(d => { if (d.dateSortKey) allowedDates.add(d.dateSortKey); });
+
+            const mapToChoices = (set, currentSelections) => {
+                return Array.from(set)
+                    .filter(v => !currentSelections.includes(v))
+                    .sort()
+                    .map(v => ({
+                        value: v,
+                        label: v
+                    }));
+            };
+
+            const mapToDayOfWeekChoices = (set, currentSelections) => {
+                const order = ['จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์', 'อาทิตย์'];
+                return Array.from(set)
+                    .filter(v => !currentSelections.includes(v))
+                    .map(v => ({ value: v, label: v, order: order.indexOf(v) }))
+                    .sort((a, b) => a.order - b.order)
+                    .map(v => ({ value: v.value, label: v.label }));
+            };
+
+            choicesInstances.wkday.setChoices(mapToChoices(wkdaySet, currentWkdays), 'value', 'label', true);
+            choicesInstances.dayofweek.setChoices(mapToDayOfWeekChoices(dayOfWeekSetDynamic, currentDayOfWeeks), 'value', 'label', true);
+            choicesInstances.hour.setChoices(mapToChoices(hourSet, currentHours), 'value', 'label', true);
+            choicesInstances.program.setChoices(mapToChoices(programSet, currentPrograms), 'value', 'label', true);
+
+            if (fpInstance) {
+                fpInstance.allowedDates = allowedDates;
+                fpInstance.redraw();
+
+                if (allowedDates.size > 0) {
+                    const minDate = new Date(Math.min(...Array.from(allowedDates)));
+                    fpInstance.jumpToDate(minDate);
+                }
+            }
+        }
+
+        let isUpdatingChoices = false;
+        function applyFilters() {
+            if (isUpdatingChoices) return;
+            isUpdatingChoices = true;
+            updateDropdownChoices();
+            isUpdatingChoices = false;
+
+            const selectedWkdays = choicesInstances.wkday.getValue(true);
+            const selectedDayOfWeeks = choicesInstances.dayofweek.getValue(true);
             const selectedHours = choicesInstances.hour.getValue(true);
             const selectedPrograms = choicesInstances.program.getValue(true);
 
@@ -429,6 +594,7 @@
 
             const filteredData = globalData.filter(d => {
                 const passWkday = selectedWkdays.length === 0 || selectedWkdays.includes(String(d.wkday));
+                const passDayOfWeek = selectedDayOfWeeks.length === 0 || selectedDayOfWeeks.includes(String(d.dayOfWeek));
                 const passHour = selectedHours.length === 0 || selectedHours.includes(String(d.hour));
                 const passProgram = selectedPrograms.length === 0 || selectedPrograms.includes(String(d.program));
 
@@ -437,7 +603,7 @@
                     passDate = d.dateSortKey >= startDate && d.dateSortKey <= endDate;
                 }
 
-                return passWkday && passHour && passProgram && passDate;
+                return passWkday && passDayOfWeek && passHour && passProgram && passDate;
             });
 
             // 1 & 2. Main Time Series Aggregation (Dynamic)
@@ -478,36 +644,49 @@
             if (selectedPrograms.length > 0) {
                 totalViewerCanvas.parentElement.style.display = 'block';
 
-                const aggregatedProgramDaily = {};
-                const uniqueDatesMap = new Map();
+                const timeframe = document.getElementById('chart-timeframe').value;
+                const aggregatedProgram = {};
+                const uniqueTimeKeysMap = new Map();
                 const uniquePrograms = new Set();
 
                 filteredData.forEach(d => {
-                    if (!uniqueDatesMap.has(d.date)) {
-                        uniqueDatesMap.set(d.date, d.dateSortKey);
+                    let groupByKey = d.dateSortKey + (d.sortKey * 60000); // Chronological sort
+                    let displayLabel = `${d.date} ${d.time_interval}`;
+
+                    if (timeframe === 'hourly') {
+                        displayLabel = `${d.date} ${d.hour}`;
+                        // Keep chronological sortKey based on the first interval of this hour
+                    } else if (timeframe === 'daily') {
+                        displayLabel = d.date;
+                        groupByKey = d.dateSortKey;
+                    }
+
+                    if (!uniqueTimeKeysMap.has(displayLabel)) {
+                        uniqueTimeKeysMap.set(displayLabel, groupByKey);
                     }
                     uniquePrograms.add(d.program);
-                    const key = `${d.date}_${d.program}`;
-                    if (!aggregatedProgramDaily[key]) {
-                        aggregatedProgramDaily[key] = 0;
+                    const key = `${displayLabel}_${d.program}`;
+                    if (!aggregatedProgram[key]) {
+                        aggregatedProgram[key] = 0;
                     }
-                    // เลือกแสดงเฉพาะยอดวิวสะสม 10 นาที (d.y) เป็นตัวแทนของยอดวิวรายการ
-                    aggregatedProgramDaily[key] += (d.y || 0);
+                    aggregatedProgram[key] += (d.y || 0);
                 });
 
-                const sortedDates = Array.from(uniqueDatesMap.keys()).sort((a, b) => {
-                    return uniqueDatesMap.get(a) - uniqueDatesMap.get(b);
+                const sortedTimeLabels = Array.from(uniqueTimeKeysMap.keys()).sort((a, b) => {
+                    const keyA = uniqueTimeKeysMap.get(a);
+                    const keyB = uniqueTimeKeysMap.get(b);
+                    return keyA > keyB ? 1 : (keyA < keyB ? -1 : 0);
                 });
                 const programs = Array.from(uniquePrograms).sort();
 
-                const datasetsProgramDaily = programs.map((prog, index) => {
+                const datasetsProgram = programs.map((prog, index) => {
                     const hue = (index * 137.5) % 360;
                     const color = `hsl(${hue}, 70%, 50%)`;
                     const bgColor = `hsla(${hue}, 70%, 50%, 0.7)`;
 
-                    const data = sortedDates.map(date => {
-                        const key = `${date}_${prog}`;
-                        return aggregatedProgramDaily[key] || 0;
+                    const data = sortedTimeLabels.map(timeLabel => {
+                        const key = `${timeLabel}_${prog}`;
+                        return aggregatedProgram[key] || 0;
                     });
 
                     return {
@@ -519,7 +698,16 @@
                     };
                 });
 
-                renderTotalViewerChartDaily(sortedDates, datasetsProgramDaily);
+                let programChartTitle = 'ยอดวิวของแต่ละรายการ: ราย 10 นาที';
+                let xAxisLabel = 'เวลา (Time)';
+                if (timeframe === 'hourly') {
+                    programChartTitle = 'ยอดวิวของแต่ละรายการ: รายชั่วโมง';
+                } else if (timeframe === 'daily') {
+                    programChartTitle = 'ยอดวิวของแต่ละรายการ: รายวัน';
+                    xAxisLabel = 'วันที่ (Date)';
+                }
+
+                renderTotalViewerChartDaily(sortedTimeLabels, datasetsProgram, programChartTitle, xAxisLabel);
             } else {
                 totalViewerCanvas.parentElement.style.display = 'none';
                 if (chartTotalViewerDailyInstance) {
@@ -541,20 +729,114 @@
             const categoryData = Object.values(aggregatedCategory);
             renderCategoryPieChart(categoryLabels, categoryData);
 
-            // 5. Agency Aggregation (Bar Chart)
-            const aggregatedAgency = {};
+            // 5. Monthly Aggregation (Bar Chart)
+            const aggregatedMonth = {};
             filteredData.forEach(d => {
-                const key = d.agency;
-                if (!aggregatedAgency[key]) {
-                    aggregatedAgency[key] = 0;
+                const parts = d.date.split('/');
+                if (parts.length === 3) {
+                    const monthStr = ['ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.', 'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.'][parseInt(parts[1], 10) - 1];
+                    const monthYear = `${monthStr} ${parts[2]}`;
+                    const sortKey = `${parts[2]}${parts[1].padStart(2, '0')}`;
+
+                    if (!aggregatedMonth[monthYear]) {
+                        aggregatedMonth[monthYear] = { value: 0, sortKey: sortKey };
+                    }
+                    aggregatedMonth[monthYear].value += (d.y || 0);
                 }
-                aggregatedAgency[key] += (d.reach || 0); // Use reach
             });
-            // Sort by reach descending
-            const agencyEntries = Object.entries(aggregatedAgency).sort((a, b) => b[1] - a[1]);
-            const agencyLabels = agencyEntries.map(e => e[0]);
-            const agencyData = agencyEntries.map(e => e[1]);
-            renderAgencyBarChart(agencyLabels, agencyData);
+
+            const monthEntries = Object.entries(aggregatedMonth).sort((a, b) => a[1].sortKey.localeCompare(b[1].sortKey));
+            const monthLabels = monthEntries.map(e => e[0]);
+            const monthData = monthEntries.map(e => e[1].value);
+            renderMonthlyBarChart(monthLabels, monthData);
+
+            // 6. Stepped Time Series Chart (by Date and Time)
+            const steppedContainer = document.getElementById('steppedChartContainer');
+            if (selectedDayOfWeeks.length > 0 && selectedHours.length > 0) {
+                steppedContainer.style.display = 'block';
+
+                const uniqueTimesMap = new Map();
+                const uniqueDatesForStepped = new Set();
+                const aggregatedStepped = {};
+
+                filteredData.forEach(d => {
+                    if (d.time_interval && d.time_interval !== 'Unknown' && d.date && d.date !== 'Unknown') {
+                        if (!uniqueTimesMap.has(d.time_interval)) {
+                            uniqueTimesMap.set(d.time_interval, d.sortKey);
+                        }
+                        uniqueDatesForStepped.add(d.date);
+
+                        const key = `${d.date}_${d.time_interval}`;
+                        if (!aggregatedStepped[key]) {
+                            aggregatedStepped[key] = { sum: 0, count: 0 };
+                        }
+                        aggregatedStepped[key].sum += (d.y || 0);
+                        aggregatedStepped[key].count += 1;
+                    }
+                });
+
+                const sortedTimes = Array.from(uniqueTimesMap.keys()).sort((a, b) => {
+                    return uniqueTimesMap.get(a) - uniqueTimesMap.get(b);
+                });
+
+                const datesStepped = Array.from(uniqueDatesForStepped).sort((a, b) => {
+                    const partsA = a.split('/');
+                    const partsB = b.split('/');
+                    return new Date(partsA[2], partsA[1] - 1, partsA[0]) - new Date(partsB[2], partsB[1] - 1, partsB[0]);
+                });
+
+                const datasetsStepped = datesStepped.map((dateStr, index) => {
+                    const hue = (index * 137.5) % 360;
+                    const color = `hsl(${hue}, 70%, 50%)`;
+
+                    // Format date string to Thai long format
+                    const parts = dateStr.split('/');
+                    let dateLabel = dateStr;
+                    if (parts.length === 3) {
+                        const dObj = new Date(parts[2], parts[1] - 1, parts[0]);
+                        const days = ['อาทิตย์', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์'];
+                        const months = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
+                        dateLabel = `วัน${days[dObj.getDay()]}ที่ ${parseInt(parts[0], 10)} ${months[dObj.getMonth()]} ${parts[2]}`;
+                    }
+
+                    const data = sortedTimes.map(timeStr => {
+                        const key = `${dateStr}_${timeStr}`;
+                        if (aggregatedStepped[key]) {
+                            return Math.round(aggregatedStepped[key].sum / aggregatedStepped[key].count);
+                        }
+                        return null;
+                    });
+
+                    return {
+                        label: dateLabel,
+                        data: data,
+                        borderColor: color,
+                        backgroundColor: color,
+                        borderWidth: 2,
+                        fill: false,
+                        stepped: true,
+                        pointRadius: 4,
+                        pointHoverRadius: 6,
+                        spanGaps: true
+                    };
+                });
+
+                const formattedLabels = sortedTimes.map(t => {
+                    const match = t.match(/^(\d{2})\.(\d{2})/);
+                    if (match) {
+                        return `${match[1]}:${match[2]}:00`;
+                    }
+                    return t;
+                });
+
+                renderSteppedTimeSeriesChart(formattedLabels, datasetsStepped);
+            } else {
+                steppedContainer.style.display = 'none';
+                if (chartSteppedInstance) {
+                    chartSteppedInstance.destroy();
+                    chartSteppedInstance = null;
+                }
+            }
         }
 
         let chartMainInstance = null;
@@ -630,6 +912,22 @@
                             text: chartTitle,
                             font: { size: 16 }
                         },
+                        datalabels: {
+                            display: true,
+                            align: function (context) {
+                                return context.datasetIndex === 0 ? 'top' : 'bottom';
+                            },
+                            color: function (context) {
+                                return context.dataset.borderColor;
+                            },
+                            font: {
+                                weight: 'bold',
+                                size: 11
+                            },
+                            formatter: function (value) {
+                                return value > 0 ? value.toLocaleString() : '';
+                            }
+                        },
                         tooltip: {
                             callbacks: {
                                 label: function (context) {
@@ -657,7 +955,7 @@
 
 
 
-        function renderTotalViewerChartDaily(labels, datasets) {
+        function renderTotalViewerChartDaily(labels, datasets, chartTitle, xAxisLabel) {
             const ctx = document.getElementById('totalViewerChartDaily').getContext('2d');
 
             if (chartTotalViewerDailyInstance) {
@@ -682,7 +980,7 @@
                             stacked: true,
                             title: {
                                 display: true,
-                                text: 'วันที่ (Date)'
+                                text: xAxisLabel || 'วันที่ (Date)'
                             },
                             grid: {
                                 display: false
@@ -700,7 +998,7 @@
                     plugins: {
                         title: {
                             display: true,
-                            text: 'ยอดวิวของแต่ละรายการ: รายวัน',
+                            text: chartTitle || 'ยอดวิวของแต่ละรายการ',
                             font: { size: 16 }
                         },
                         tooltip: {
@@ -769,14 +1067,46 @@
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
+                    layout: {
+                        padding: {
+                            top: 0,
+                            bottom: 0,
+                            left: 0,
+                            right: 0
+                        }
+                    },
                     plugins: {
+                        legend: {
+                            position: 'bottom',
+                            labels: {
+                                usePointStyle: true,
+                            }
+                        },
                         title: {
                             display: true,
                             text: 'สัดส่วนยอดวิวรวมแยกตามประเภทรายการ',
                             font: { size: 16 }
                         },
                         datalabels: {
-                            display: false // Disable data labels for doughnut to prevent clutter
+                            display: function (context) {
+                                const total = context.chart._metasets[context.datasetIndex].total;
+                                const value = context.dataset.data[context.dataIndex];
+                                return (value / total * 100 >= 5) ? 'auto' : false;
+                            },
+                            color: '#fff',
+                            font: {
+                                weight: 'bold',
+                                size: 12
+                            },
+                            textStrokeColor: 'rgba(0,0,0,0.5)',
+                            textStrokeWidth: 2,
+                            formatter: function (value, context) {
+                                const total = context.chart._metasets[context.datasetIndex].total;
+                                if (total === 0) return '';
+                                const percentage = ((value / total) * 100).toFixed(1) + '%';
+                                return percentage + '\n(' + value.toLocaleString() + ')';
+                            },
+                            textAlign: 'center'
                         },
                         tooltip: {
                             callbacks: {
@@ -797,23 +1127,27 @@
             });
         }
 
-        function renderAgencyBarChart(labels, data) {
+        let chartMonthlyInstance = null;
+        function renderMonthlyBarChart(labels, data) {
             const ctx = document.getElementById('agencyBarChart').getContext('2d');
 
+            if (chartMonthlyInstance) {
+                chartMonthlyInstance.destroy();
+            }
             if (chartAgencyInstance) {
                 chartAgencyInstance.destroy();
+                chartAgencyInstance = null;
             }
 
-            // Shift hue by 120 (starts with green) to distinguish from other charts
-            const backgroundColors = labels.map((_, i) => `hsla(${((i * 50) + 120) % 360}, 70%, 50%, 0.7)`);
-            const borderColors = labels.map((_, i) => `hsl(${((i * 50) + 120) % 360}, 70%, 50%)`);
+            const backgroundColors = labels.map((_, i) => `hsla(${((i * 50) + 250) % 360}, 70%, 50%, 0.7)`);
+            const borderColors = labels.map((_, i) => `hsl(${((i * 50) + 250) % 360}, 70%, 50%)`);
 
-            chartAgencyInstance = new Chart(ctx, {
+            chartMonthlyInstance = new Chart(ctx, {
                 type: 'bar',
                 data: {
                     labels: labels,
                     datasets: [{
-                        label: 'จำนวนเครื่องรวม(เข้าถึง)',
+                        label: 'ผลรวมค่าสะสม',
                         data: data,
                         backgroundColor: backgroundColors,
                         borderColor: borderColors,
@@ -823,35 +1157,116 @@
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
-                    indexAxis: 'y', // Horizontal bar chart
                     scales: {
                         x: {
+                            title: {
+                                display: true,
+                                text: 'เดือน (Month)'
+                            }
+                        },
+                        y: {
                             beginAtZero: true,
                             title: {
                                 display: true,
-                                text: 'การเข้าถึงรวม (Reach)'
+                                text: 'ผลรวมค่าสะสม'
                             }
                         }
                     },
                     plugins: {
                         title: {
                             display: true,
-                            text: 'ประสิทธิภาพการเข้าถึงโดยรวม แยกตามหน่วยงาน',
+                            text: 'ภาพรวมค่าสะสม จำแนกตามเดือน',
                             font: { size: 16 }
                         },
                         datalabels: {
                             display: function (context) {
                                 return context.dataset.data[context.dataIndex] > 0;
                             },
-                            anchor: 'end',
-                            align: 'right',
-                            color: '#333',
+                            anchor: 'center',
+                            align: 'center',
+                            color: '#fff',
+                            font: {
+                                weight: 'bold'
+                            },
+                            textStrokeColor: 'rgba(0,0,0,0.5)',
+                            textStrokeWidth: 2,
                             formatter: function (value) {
                                 return value.toLocaleString();
                             }
                         },
                         legend: {
                             display: false
+                        }
+                    }
+                }
+            });
+        }
+
+        let chartSteppedInstance = null;
+        function renderSteppedTimeSeriesChart(labels, datasets) {
+            const ctx = document.getElementById('steppedTimeSeriesChart').getContext('2d');
+
+            if (chartSteppedInstance) {
+                chartSteppedInstance.destroy();
+            }
+
+            chartSteppedInstance = new Chart(ctx, {
+                type: 'line',
+                data: {
+                    labels: labels,
+                    datasets: datasets
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    spanGaps: true,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false,
+                    },
+                    scales: {
+                        x: {
+                            title: {
+                                display: true,
+                                text: 'ช่วงเวลา (Time Start)'
+                            },
+                            grid: { display: false }
+                        },
+                        y: {
+                            beginAtZero: false,
+                            title: {
+                                display: true,
+                                text: 'Average of จำนวนสะสม10นาที'
+                            }
+                        }
+                    },
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'Average of จำนวนสะสม10นาที by Time Start and DD/MM/YYYY',
+                            font: { size: 16 }
+                        },
+                        datalabels: {
+                            display: function (context) {
+                                return context.dataset.data[context.dataIndex] !== null;
+                            },
+                            align: 'top',
+                            color: function (context) {
+                                return context.dataset.borderColor;
+                            },
+                            font: {
+                                weight: 'bold',
+                                size: 11
+                            },
+                            formatter: function (value) {
+                                return value !== null ? value.toLocaleString() : '';
+                            }
+                        },
+                        legend: {
+                            position: 'top',
+                            labels: {
+                                usePointStyle: true,
+                            }
                         }
                     }
                 }
