@@ -70,6 +70,20 @@
             flex-direction: column;
         }
 
+        .filter-group .choices {
+            flex: 1;
+            margin-bottom: 0;
+        }
+
+        .filter-group .choices__inner {
+            height: 100%;
+        }
+
+        .filter-group > input,
+        .filter-group > select {
+            flex: 1;
+        }
+
         .filter-group label {
             font-size: 14px;
             font-weight: 600;
@@ -816,8 +830,7 @@
                 });
 
                 const datasetsStepped = datesStepped.map((dateStr, index) => {
-                    const hue = (index * 137.5) % 360;
-                    const color = `hsl(${hue}, 70%, 50%)`;
+                    let color = `hsl(${(index * 137.5) % 360}, 70%, 50%)`;
 
                     // Format date string to Thai long format
                     const parts = dateStr.split('/');
@@ -827,6 +840,17 @@
                         const days = ['อาทิตย์', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์'];
                         const months = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
                         dateLabel = `วัน${days[dObj.getDay()]}ที่ ${parseInt(parts[0], 10)} ${months[dObj.getMonth()]} ${parts[2]}`;
+                        
+                        const dayColors = [
+                            '#e74c3c', // Sunday (Red)
+                            '#f1c40f', // Monday (Yellow)
+                            '#e84393', // Tuesday (Pink)
+                            '#2ecc71', // Wednesday (Green)
+                            '#e67e22', // Thursday (Orange)
+                            '#3498db', // Friday (Blue)
+                            '#9b59b6'  // Saturday (Purple)
+                        ];
+                        color = dayColors[dObj.getDay()];
                     }
 
                     const data = sortedTimes.map(timeStr => {
