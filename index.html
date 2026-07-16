@@ -145,9 +145,25 @@
 <body>
 
     <div id="full-page-loader"
-        style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background-color: #f0f2f5; display: flex; flex-direction: column; justify-content: center; align-items: center; z-index: 9999;">
+        style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background-color: #f0f2f5; display: none; flex-direction: column; justify-content: center; align-items: center; z-index: 9999;">
         <div class="spinner"></div>
         <h3 style="color: #333; margin-top: 20px;">กำลังโหลดและประมวลผลข้อมูล...</h3>
+    </div>
+
+    <div id="password-modal"
+        style="position: fixed; top: 0; left: 0; width: 100vw; height: 100vh; background-color: rgba(0,0,0,0.5); display: flex; justify-content: center; align-items: center; z-index: 10000;">
+        <div
+            style="background: white; padding: 30px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); text-align: center; max-width: 400px; width: 90%;">
+            <h3 style="margin-top: 0; color: #333;">🔒 กรุณาใส่รหัสผ่าน</h3>
+            <p style="color: #666; font-size: 14px; margin-bottom: 20px;">เพื่อเข้าดูแดชบอร์ด</p>
+            <input type="password" id="password-input"
+                style="width: 100%; padding: 10px; margin-bottom: 15px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;"
+                placeholder="รหัสผ่าน">
+            <button id="password-submit"
+                style="background-color: #3498db; color: white; border: none; padding: 10px 20px; border-radius: 4px; cursor: pointer; width: 100%; font-size: 16px; font-weight: bold;">ยืนยัน</button>
+            <div id="password-error" style="color: red; margin-top: 15px; display: none; font-size: 14px;">❌
+                รหัสผ่านไม่ถูกต้อง</div>
+        </div>
     </div>
 
     <div class="dashboard-card" id="dashboard-content" style="display: none;">
@@ -216,27 +232,6 @@
         Chart.register(ChartDataLabels);
         Chart.defaults.plugins.datalabels.display = false;
 
-        const password = prompt("🔒 กรุณาใส่รหัสผ่านเพื่อเข้าดูแดชบอร์ด:");
-        let sheetId, sheetName;
-
-        try {
-            if (!password) throw new Error("ไม่ได้ระบุรหัสผ่าน");
-
-            // Decrypt the credentials using the provided password
-            sheetId = CryptoJS.AES.decrypt(ENV.ENCRYPTED_SHEET_ID, password).toString(CryptoJS.enc.Utf8);
-            sheetName = CryptoJS.AES.decrypt(ENV.ENCRYPTED_SHEET_NAME, password).toString(CryptoJS.enc.Utf8);
-
-            if (!sheetId || !sheetName) throw new Error("รหัสผ่านไม่ถูกต้อง");
-        } catch (e) {
-            document.getElementById('full-page-loader').style.display = 'none';
-            document.body.innerHTML = `<div style="display: flex; justify-content: center; align-items: center; height: 100vh; font-family: sans-serif; background-color: #fff;">
-                <h2 style="color: red; margin: 0;">❌ เข้าถึงข้อมูลไม่ได้ (รหัสผ่านผิด)</h2>
-            </div>`;
-            throw new Error("Unauthorized"); // Stop script execution
-        }
-
-        const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}`;
-
         let globalData = [];
         let choicesInstances = {};
         let fpInstance = null;
@@ -249,25 +244,60 @@
         });
         document.getElementById('chart-timeframe').addEventListener('change', applyFilters);
 
-        fetch(url)
-            .then(response => response.text())
-            .then(text => {
-                const jsonString = text.match(/google\.visualization\.Query\.setResponse\(([\s\S\w]+)\);/)[1];
-                const safeJsonString = jsonString.replace(/new Date\((.*?)\)/g, '"Date($1)"');
-                const data = JSON.parse(safeJsonString);
+        function loadData(password) {
+            let sheetId, sheetName;
+            try {
+                if (!password) throw new Error("ไม่ได้ระบุรหัสผ่าน");
 
-                if (data.table) {
-                    preprocessingData(data.table);
-                }
-            })
-            .catch(error => {
-                console.error('Error:', error);
-                document.getElementById('full-page-loader').style.display = 'none';
-                document.getElementById('dashboard-content').style.display = 'block';
-                document.getElementById('error-message').innerText = 'เกิดข้อผิดพลาดในการโหลดข้อมูล ตรวจสอบ Sheet ID และการตั้งค่า Public';
-                document.getElementById('error-message').style.display = 'block';
-                alert('เกิดข้อผิดพลาดในการโหลดข้อมูล: โปรดตรวจสอบ Sheet ID หรือสิทธิ์การเข้าถึงไฟล์');
-            });
+                // Decrypt the credentials using the provided password
+                sheetId = CryptoJS.AES.decrypt(ENV.ENCRYPTED_SHEET_ID, password).toString(CryptoJS.enc.Utf8);
+                sheetName = CryptoJS.AES.decrypt(ENV.ENCRYPTED_SHEET_NAME, password).toString(CryptoJS.enc.Utf8);
+
+                if (!sheetId || !sheetName) throw new Error("รหัสผ่านไม่ถูกต้อง");
+            } catch (e) {
+                document.getElementById('password-error').style.display = 'block';
+                return;
+            }
+
+            document.getElementById('password-error').style.display = 'none';
+            document.getElementById('password-modal').style.display = 'none';
+            document.getElementById('full-page-loader').style.display = 'flex';
+
+            const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}`;
+
+            fetch(url)
+                .then(response => response.text())
+                .then(text => {
+                    const jsonString = text.match(/google\.visualization\.Query\.setResponse\(([\s\S\w]+)\);/)[1];
+                    const safeJsonString = jsonString.replace(/new Date\((.*?)\)/g, '"Date($1)"');
+                    const data = JSON.parse(safeJsonString);
+
+                    if (data.table) {
+                        preprocessingData(data.table);
+                    }
+                })
+                .catch(error => {
+                    console.error('Error:', error);
+                    document.getElementById('full-page-loader').style.display = 'none';
+                    document.getElementById('dashboard-content').style.display = 'block';
+                    document.getElementById('error-message').innerText = 'เกิดข้อผิดพลาดในการโหลดข้อมูล ตรวจสอบ Sheet ID และการตั้งค่า Public';
+                    document.getElementById('error-message').style.display = 'block';
+                    alert('เกิดข้อผิดพลาดในการโหลดข้อมูล: โปรดตรวจสอบ Sheet ID หรือสิทธิ์การเข้าถึงไฟล์');
+                });
+        }
+
+        document.getElementById('password-submit').addEventListener('click', () => {
+            const pwd = document.getElementById('password-input').value;
+            loadData(pwd);
+        });
+
+        document.getElementById('password-input').addEventListener('keypress', (e) => {
+            if (e.key === 'Enter') {
+                const pwd = document.getElementById('password-input').value;
+                loadData(pwd);
+            }
+        });
+
 
         function preprocessingData(table) {
             let dateColIdx = -1;
