@@ -135,6 +135,8 @@
     <script src="https://cdn.jsdelivr.net/npm/virtual-select-plugin@1.0.44/dist/virtual-select.min.js"></script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
     <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
     <style>
         #filter-daterange {
             padding: 10px;
@@ -185,7 +187,26 @@
     </div>
 
     <div class="dashboard-card" id="dashboard-content" style="display: none;">
-        <h2>📊 รายงานผู้ชม (ผลรวมตามช่วงเวลา)</h2>
+        <div
+            style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 10px;">
+            <h2 style="margin: 0;">📊 รายงานผู้ชม (ผลรวมตามช่วงเวลา)</h2>
+            <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+                <select id="globalChartTypeSelect"
+                    style="padding: 8px 12px; border-radius: 4px; border: 1px solid #ccc; font-size: 14px; background: white; cursor: pointer; font-weight: bold; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                    <option value="avg" selected>แสดงค่าเฉลี่ย (AVG)</option>
+                    <option value="sum">แสดงผลรวม (SUM)</option>
+                </select>
+                <button id="export-csv-btn"
+                    style="padding: 8px 12px; background: #27ae60; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">📥
+                    Export CSV</button>
+                <button id="export-xlsx-btn"
+                    style="padding: 8px 12px; background: #2980b9; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">📥
+                    Export XLSX</button>
+                <button id="export-png-btn"
+                    style="padding: 8px 12px; background: #8e44ad; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">📸
+                    Save as Image</button>
+            </div>
+        </div>
 
         <!-- Filter Controls -->
         <div class="filter-section">
@@ -222,29 +243,26 @@
         <div id="error-message"></div>
 
         <!-- The Main Canvas -->
-        <div id="chart-wrapper">
-            <select id="mainChartTypeSelect"
-                style="position: absolute; top: 10px; right: 20px; z-index: 10; padding: 5px 10px; border-radius: 4px; border: 1px solid #ccc; font-size: 12px; background: white; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
-                <option value="sum">ผลรวม (SUM)</option>
-                <option value="avg">ค่าเฉลี่ย (AVG)</option>
-            </select>
-            <canvas id="mainTimeSeriesChart"></canvas>
-        </div>
-        <div id="chart-wrapper">
-            <canvas id="totalViewerChartDaily"></canvas>
-        </div>
-        <div class="chart-row">
-            <div class="chart-col">
-                <canvas id="categoryPieChart"></canvas>
-            </div>
-            <div class="chart-col">
-                <canvas id="agencyBarChart"></canvas>
-            </div>
-        </div>
-
-        <div id="steppedChartContainer" style="display: none;">
+        <div id="charts-container" style="padding-top: 10px;">
             <div id="chart-wrapper">
-                <canvas id="steppedTimeSeriesChart"></canvas>
+                <canvas id="mainTimeSeriesChart"></canvas>
+            </div>
+            <div id="chart-wrapper">
+                <canvas id="totalViewerChartDaily"></canvas>
+            </div>
+            <div class="chart-row">
+                <div class="chart-col">
+                    <canvas id="categoryPieChart"></canvas>
+                </div>
+                <div class="chart-col">
+                    <canvas id="monthlyBarChart"></canvas>
+                </div>
+            </div>
+
+            <div id="steppedChartContainer" style="display: none;">
+                <div id="chart-wrapper">
+                    <canvas id="steppedTimeSeriesChart"></canvas>
+                </div>
             </div>
         </div>
     </div>
@@ -266,7 +284,7 @@
             shouldSort: false
         });
         document.getElementById('chart-timeframe').addEventListener('change', applyFilters);
-        document.getElementById('mainChartTypeSelect').addEventListener('change', applyFilters);
+        document.getElementById('globalChartTypeSelect').addEventListener('change', applyFilters);
 
         function loadData(password) {
             let sheetId, sheetName;
@@ -697,9 +715,11 @@
                 return passWkday && passDayOfWeek && passHour && passProgram && passDate;
             });
 
+            const globalChartType = document.getElementById('globalChartTypeSelect').value;
+
             // 1 & 2. Main Time Series Aggregation (Dynamic)
             const timeframe = document.getElementById('chart-timeframe').value;
-            const mainChartType = document.getElementById('mainChartTypeSelect').value;
+            const mainChartType = globalChartType;
             const aggregatedMain = {};
             let chartTitle = '';
 
@@ -759,9 +779,10 @@
                     uniquePrograms.add(d.program);
                     const key = `${displayLabel}_${d.program}`;
                     if (!aggregatedProgram[key]) {
-                        aggregatedProgram[key] = 0;
+                        aggregatedProgram[key] = { sum: 0, count: 0 };
                     }
-                    aggregatedProgram[key] += (d.y || 0);
+                    aggregatedProgram[key].sum += (d.y || 0);
+                    aggregatedProgram[key].count += 1;
                 });
 
                 const sortedTimeLabels = Array.from(uniqueTimeKeysMap.keys()).sort((a, b) => {
@@ -778,7 +799,10 @@
 
                     const data = sortedTimeLabels.map(timeLabel => {
                         const key = `${timeLabel}_${prog}`;
-                        return aggregatedProgram[key] || 0;
+                        if (aggregatedProgram[key]) {
+                            return globalChartType === 'avg' ? (aggregatedProgram[key].sum / aggregatedProgram[key].count) : aggregatedProgram[key].sum;
+                        }
+                        return 0;
                     });
 
                     return {
@@ -790,10 +814,10 @@
                     };
                 });
 
-                let programChartTitle = 'ยอดวิวของแต่ละรายการ: รายวัน';
+                let programChartTitle = globalChartType === 'avg' ? 'ค่าเฉลี่ยยอดวิวของแต่ละรายการ: รายวัน' : 'ผลรวมยอดวิวของแต่ละรายการ: รายวัน';
                 let xAxisLabel = 'วันที่ (Date)';
 
-                renderTotalViewerChartDaily(sortedTimeLabels, datasetsProgram, programChartTitle, xAxisLabel);
+                renderTotalViewerChartDaily(sortedTimeLabels, datasetsProgram, programChartTitle, xAxisLabel, globalChartType);
             } else {
                 totalViewerCanvas.parentElement.style.display = 'none';
                 if (chartTotalViewerDailyInstance) {
@@ -807,16 +831,23 @@
             filteredData.forEach(d => {
                 const key = d.category;
                 if (!aggregatedCategory[key]) {
-                    aggregatedCategory[key] = 0;
+                    aggregatedCategory[key] = { sum: 0, count: 0 };
                 }
-                aggregatedCategory[key] += (d.y || 0); // Use views
+                aggregatedCategory[key].sum += (d.y || 0); // Use views
+                aggregatedCategory[key].count += 1;
             });
             const categoryLabels = Object.keys(aggregatedCategory);
-            const categoryData = Object.values(aggregatedCategory);
-            renderCategoryPieChart(categoryLabels, categoryData);
+            const categoryData = Object.values(aggregatedCategory).map(item => {
+                return globalChartType === 'avg' ? (item.sum / item.count) : item.sum;
+            });
+            let pieChartTitle = globalChartType === 'avg' ? 'สัดส่วนค่าเฉลี่ยยอดวิวแยกตามประเภทรายการ' : 'สัดส่วนยอดวิวรวมแยกตามประเภทรายการ';
+            renderCategoryPieChart(categoryLabels, categoryData, pieChartTitle, globalChartType);
 
             // 5. Monthly Aggregation (Bar Chart)
             const aggregatedMonth = {};
+            const uniqueMonthsMap = new Map();
+            const uniqueProgramsMonth = new Set();
+
             filteredData.forEach(d => {
                 const parts = d.date.split('/');
                 if (parts.length === 3) {
@@ -824,17 +855,70 @@
                     const monthYear = `${monthStr} ${parts[2]}`;
                     const sortKey = `${parts[2]}${parts[1].padStart(2, '0')}`;
 
-                    if (!aggregatedMonth[monthYear]) {
-                        aggregatedMonth[monthYear] = { value: 0, sortKey: sortKey };
+                    if (!uniqueMonthsMap.has(monthYear)) {
+                        uniqueMonthsMap.set(monthYear, sortKey);
                     }
-                    aggregatedMonth[monthYear].value += (d.y || 0);
+
+                    let progKey = selectedPrograms.length > 0 ? d.program : 'Total';
+                    if (selectedPrograms.length > 0) {
+                        uniqueProgramsMonth.add(d.program);
+                    }
+
+                    const key = `${monthYear}_${progKey}`;
+                    if (!aggregatedMonth[key]) {
+                        aggregatedMonth[key] = 0;
+                    }
+                    aggregatedMonth[key] += (d.y || 0);
                 }
             });
 
-            const monthEntries = Object.entries(aggregatedMonth).sort((a, b) => a[1].sortKey.localeCompare(b[1].sortKey));
-            const monthLabels = monthEntries.map(e => e[0]);
-            const monthData = monthEntries.map(e => e[1].value);
-            renderMonthlyBarChart(monthLabels, monthData);
+            const sortedMonthLabels = Array.from(uniqueMonthsMap.keys()).sort((a, b) => {
+                const keyA = uniqueMonthsMap.get(a);
+                const keyB = uniqueMonthsMap.get(b);
+                return keyA.localeCompare(keyB);
+            });
+
+            let datasetsMonth = [];
+
+            if (selectedPrograms.length > 0) {
+                const programsM = Array.from(uniqueProgramsMonth).sort();
+                datasetsMonth = programsM.map((prog, index) => {
+                    const hue = (index * 137.5) % 360;
+                    const color = `hsl(${hue}, 70%, 50%)`;
+                    const bgColor = `hsla(${hue}, 70%, 50%, 0.7)`;
+
+                    const data = sortedMonthLabels.map(monthLabel => {
+                        const key = `${monthLabel}_${prog}`;
+                        return aggregatedMonth[key] || 0;
+                    });
+
+                    return {
+                        label: prog,
+                        data: data,
+                        backgroundColor: bgColor,
+                        borderColor: color,
+                        borderWidth: 1
+                    };
+                });
+            } else {
+                const data = sortedMonthLabels.map(monthLabel => {
+                    const key = `${monthLabel}_Total`;
+                    return aggregatedMonth[key] || 0;
+                });
+
+                const backgroundColors = sortedMonthLabels.map((_, i) => `hsla(${((i * 50) + 250) % 360}, 70%, 50%, 0.7)`);
+                const borderColors = sortedMonthLabels.map((_, i) => `hsl(${((i * 50) + 250) % 360}, 70%, 50%)`);
+
+                datasetsMonth = [{
+                    label: 'ผลรวมค่าสะสม',
+                    data: data,
+                    backgroundColor: backgroundColors,
+                    borderColor: borderColors,
+                    borderWidth: 1
+                }];
+            }
+
+            renderMonthlyBarChart(sortedMonthLabels, datasetsMonth, selectedPrograms.length > 0, globalChartType);
 
             // 6. Stepped Time Series Chart (by Date and Time)
             const steppedContainer = document.getElementById('steppedChartContainer');
@@ -883,22 +967,26 @@
                         const months = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
                         dateLabel = `วัน${days[dObj.getDay()]}ที่ ${parseInt(parts[0], 10)} ${months[dObj.getMonth()]} ${parts[2]}`;
 
-                        const dayColors = [
-                            '#e74c3c', // Sunday (Red)
-                            '#f1c40f', // Monday (Yellow)
-                            '#e84393', // Tuesday (Pink)
-                            '#2ecc71', // Wednesday (Green)
-                            '#e67e22', // Thursday (Orange)
-                            '#3498db', // Friday (Blue)
-                            '#9b59b6'  // Saturday (Purple)
-                        ];
-                        color = dayColors[dObj.getDay()];
+                        // ถ้าไม่ได้เลือกแค่วันเดียว ให้ Fix สีตามวันในสัปดาห์
+                        if (selectedDayOfWeeks.length !== 1) {
+                            const dayColors = [
+                                '#e74c3c', // Sunday (Red)
+                                '#f1c40f', // Monday (Yellow)
+                                '#e84393', // Tuesday (Pink)
+                                '#2ecc71', // Wednesday (Green)
+                                '#e67e22', // Thursday (Orange)
+                                '#3498db', // Friday (Blue)
+                                '#9b59b6'  // Saturday (Purple)
+                            ];
+                            color = dayColors[dObj.getDay()];
+                        }
                     }
 
                     const data = sortedTimes.map(timeStr => {
                         const key = `${dateStr}_${timeStr}`;
                         if (aggregatedStepped[key]) {
-                            return Math.round(aggregatedStepped[key].sum / aggregatedStepped[key].count);
+                            let val = globalChartType === 'avg' ? (aggregatedStepped[key].sum / aggregatedStepped[key].count) : aggregatedStepped[key].sum;
+                            return Math.round(val);
                         }
                         return null;
                     });
@@ -925,7 +1013,7 @@
                     return t;
                 });
 
-                renderSteppedTimeSeriesChart(formattedLabels, datasetsStepped);
+                renderSteppedTimeSeriesChart(formattedLabels, datasetsStepped, globalChartType);
             } else {
                 steppedContainer.style.display = 'none';
                 if (chartSteppedInstance) {
@@ -1054,7 +1142,7 @@
 
 
 
-        function renderTotalViewerChartDaily(labels, datasets, chartTitle, xAxisLabel) {
+        function renderTotalViewerChartDaily(labels, datasets, chartTitle, xAxisLabel, globalChartType = 'sum') {
             const ctx = document.getElementById('totalViewerChartDaily').getContext('2d');
 
             if (chartTotalViewerDailyInstance) {
@@ -1090,7 +1178,7 @@
                             beginAtZero: true,
                             title: {
                                 display: true,
-                                text: 'ผลรวมยอดวิว (Sum)'
+                                text: globalChartType === 'avg' ? 'ค่าเฉลี่ยยอดวิว (Average)' : 'ผลรวมยอดวิว (Sum)'
                             }
                         }
                     },
@@ -1112,7 +1200,7 @@
                                         label += ': ';
                                     }
                                     if (context.parsed.y !== null) {
-                                        label += context.parsed.y.toLocaleString();
+                                        label += globalChartType === 'avg' ? context.parsed.y.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : context.parsed.y.toLocaleString();
                                     }
                                     return label;
                                 }
@@ -1135,7 +1223,7 @@
                             textStrokeColor: 'rgba(0,0,0,0.5)',
                             textStrokeWidth: 2,
                             formatter: function (value) {
-                                return value.toLocaleString();
+                                return globalChartType === 'avg' ? value.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : value.toLocaleString();
                             }
                         }
                     }
@@ -1143,7 +1231,7 @@
             });
         }
 
-        function renderCategoryPieChart(labels, data) {
+        function renderCategoryPieChart(labels, data, chartTitle, globalChartType = 'sum') {
             const ctx = document.getElementById('categoryPieChart').getContext('2d');
 
             if (chartCategoryInstance) {
@@ -1183,7 +1271,7 @@
                         },
                         title: {
                             display: true,
-                            text: 'สัดส่วนยอดวิวรวมแยกตามประเภทรายการ',
+                            text: chartTitle || 'สัดส่วนยอดวิวรวมแยกตามประเภทรายการ',
                             font: { size: 16 }
                         },
                         datalabels: {
@@ -1203,7 +1291,8 @@
                                 const total = context.chart._metasets[context.datasetIndex].total;
                                 if (total === 0) return '';
                                 const percentage = ((value / total) * 100).toFixed(1) + '%';
-                                return percentage + '\n(' + value.toLocaleString() + ')';
+                                const formattedVal = globalChartType === 'avg' ? value.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : value.toLocaleString();
+                                return percentage + '\n(' + formattedVal + ')';
                             },
                             textAlign: 'center'
                         },
@@ -1215,7 +1304,7 @@
                                         label += ': ';
                                     }
                                     if (context.parsed !== null) {
-                                        label += context.parsed.toLocaleString() + ' วิว';
+                                        label += (globalChartType === 'avg' ? context.parsed.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : context.parsed.toLocaleString()) + ' วิว';
                                     }
                                     return label;
                                 }
@@ -1227,8 +1316,8 @@
         }
 
         let chartMonthlyInstance = null;
-        function renderMonthlyBarChart(labels, data) {
-            const ctx = document.getElementById('agencyBarChart').getContext('2d');
+        function renderMonthlyBarChart(labels, datasets, isStacked, globalChartType = 'sum') {
+            const ctx = document.getElementById('monthlyBarChart').getContext('2d');
 
             if (chartMonthlyInstance) {
                 chartMonthlyInstance.destroy();
@@ -1238,43 +1327,40 @@
                 chartAgencyInstance = null;
             }
 
-            const backgroundColors = labels.map((_, i) => `hsla(${((i * 50) + 250) % 360}, 70%, 50%, 0.7)`);
-            const borderColors = labels.map((_, i) => `hsl(${((i * 50) + 250) % 360}, 70%, 50%)`);
-
             chartMonthlyInstance = new Chart(ctx, {
                 type: 'bar',
                 data: {
                     labels: labels,
-                    datasets: [{
-                        label: 'ผลรวมค่าสะสม',
-                        data: data,
-                        backgroundColor: backgroundColors,
-                        borderColor: borderColors,
-                        borderWidth: 1
-                    }]
+                    datasets: datasets
                 },
                 options: {
                     responsive: true,
                     maintainAspectRatio: false,
+                    interaction: {
+                        mode: 'index',
+                        intersect: false,
+                    },
                     scales: {
                         x: {
+                            stacked: isStacked,
                             title: {
                                 display: true,
                                 text: 'เดือน (Month)'
                             }
                         },
                         y: {
+                            stacked: isStacked,
                             beginAtZero: true,
                             title: {
                                 display: true,
-                                text: 'ผลรวมค่าสะสม'
+                                text: globalChartType === 'avg' ? 'ค่าเฉลี่ยสะสม' : 'ผลรวมค่าสะสม'
                             }
                         }
                     },
                     plugins: {
                         title: {
                             display: true,
-                            text: 'ภาพรวมค่าสะสม จำแนกตามเดือน',
+                            text: (globalChartType === 'avg' ? 'ค่าเฉลี่ยสะสม จำแนกตามเดือน' : 'ภาพรวมค่าสะสม จำแนกตามเดือน') + (isStacked ? ' (แยกตามรายการ)' : ''),
                             font: { size: 16 }
                         },
                         datalabels: {
@@ -1290,11 +1376,34 @@
                             textStrokeColor: 'rgba(0,0,0,0.5)',
                             textStrokeWidth: 2,
                             formatter: function (value) {
-                                return value.toLocaleString();
+                                return globalChartType === 'avg' ? value.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : value.toLocaleString();
                             }
                         },
                         legend: {
-                            display: false
+                            display: isStacked,
+                            position: 'top',
+                            labels: {
+                                usePointStyle: true,
+                            }
+                        },
+                        tooltip: {
+                            filter: function (tooltipItem) {
+                                return tooltipItem.parsed.y > 0;
+                            },
+                            callbacks: {
+                                label: function (context) {
+                                    let label = context.dataset.label || '';
+                                    if (label && label !== 'ผลรวมค่าสะสม' && label !== 'ค่าเฉลี่ยสะสม') {
+                                        label += ': ';
+                                    } else {
+                                        label = '';
+                                    }
+                                    if (context.parsed.y !== null) {
+                                        label += globalChartType === 'avg' ? context.parsed.y.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : context.parsed.y.toLocaleString();
+                                    }
+                                    return label;
+                                }
+                            }
                         }
                     }
                 }
@@ -1302,7 +1411,7 @@
         }
 
         let chartSteppedInstance = null;
-        function renderSteppedTimeSeriesChart(labels, datasets) {
+        function renderSteppedTimeSeriesChart(labels, datasets, globalChartType = 'sum') {
             const ctx = document.getElementById('steppedTimeSeriesChart').getContext('2d');
 
             if (chartSteppedInstance) {
@@ -1335,14 +1444,14 @@
                             beginAtZero: false,
                             title: {
                                 display: true,
-                                text: 'Average of จำนวนสะสม10นาที'
+                                text: globalChartType === 'avg' ? 'ค่าเฉลี่ยจำนวนสะสม10นาที' : 'ผลรวมจำนวนสะสม10นาที'
                             }
                         }
                     },
                     plugins: {
                         title: {
                             display: true,
-                            text: 'Average of จำนวนสะสม10นาที by Time Start and DD/MM/YYYY',
+                            text: (globalChartType === 'avg' ? 'ค่าเฉลี่ย' : 'ผลรวม') + 'จำนวนสะสม10นาที by Time Start and DD/MM/YYYY',
                             font: { size: 16 }
                         },
                         datalabels: {
@@ -1358,7 +1467,7 @@
                                 size: 11
                             },
                             formatter: function (value) {
-                                return value !== null ? value.toLocaleString() : '';
+                                return value !== null ? (globalChartType === 'avg' ? value.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : value.toLocaleString()) : '';
                             }
                         },
                         legend: {
@@ -1371,6 +1480,109 @@
                 }
             });
         }
+
+        document.getElementById('export-csv-btn').addEventListener('click', () => {
+            if (!globalData || globalData.length === 0) {
+                alert("ไม่มีข้อมูลสำหรับ Export");
+                return;
+            }
+            const dataToExport = getFilteredOptions('none');
+            exportToCSV(dataToExport, "dashboard_data.csv");
+        });
+
+        document.getElementById('export-xlsx-btn').addEventListener('click', () => {
+            if (!globalData || globalData.length === 0) {
+                alert("ไม่มีข้อมูลสำหรับ Export");
+                return;
+            }
+            if (typeof XLSX === 'undefined') {
+                alert("เกิดข้อผิดพลาด: ไม่พบไลบรารี XLSX");
+                return;
+            }
+            const dataToExport = getFilteredOptions('none');
+            exportToXLSX(dataToExport, "dashboard_data.xlsx");
+        });
+
+        function formatDataForExport(data) {
+            return data.map(d => ({
+                "วันที่ (Date)": d.date,
+                "เวลา (Time)": d.time_interval,
+                "วันในสัปดาห์ (Day of Week)": d.dayOfWeek,
+                "ประเภทวัน (WKDAY/WKEND)": d.wkday,
+                "รายการ (Program)": d.program,
+                "ประเภท (Category)": d.category,
+                "หน่วยงาน (Agency)": d.agency,
+                "จำนวนเครื่องรับชมสะสม 10 นาที": d.y,
+                "จำนวนเครื่องรวม (Reach)": d.reach
+            }));
+        }
+
+        function exportToCSV(data, filename) {
+            const formatted = formatDataForExport(data);
+            if (formatted.length === 0) return;
+            const headers = Object.keys(formatted[0]);
+            const csvRows = [];
+            csvRows.push(headers.join(','));
+
+            for (const row of formatted) {
+                const values = headers.map(header => {
+                    const escaped = ('' + (row[header] || '')).replace(/"/g, '""');
+                    return `"${escaped}"`;
+                });
+                csvRows.push(values.join(','));
+            }
+
+            const csvString = csvRows.join('\n');
+            const blob = new Blob(["\uFEFF" + csvString], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement("a");
+            if (link.download !== undefined) {
+                const url = URL.createObjectURL(blob);
+                link.setAttribute("href", url);
+                link.setAttribute("download", filename);
+                link.style.visibility = 'hidden';
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+            }
+        }
+
+        function exportToXLSX(data, filename) {
+            const formatted = formatDataForExport(data);
+            const ws = XLSX.utils.json_to_sheet(formatted);
+            const wb = XLSX.utils.book_new();
+            XLSX.utils.book_append_sheet(wb, ws, "Dashboard Data");
+            XLSX.writeFile(wb, filename);
+        }
+
+        document.getElementById('export-png-btn').addEventListener('click', () => {
+            const captureTarget = document.getElementById('charts-container');
+            if (!captureTarget) {
+                alert('ไม่สามารถบันทึกภาพได้ในขณะนี้');
+                return;
+            }
+
+            const exportBtn = document.getElementById('export-png-btn');
+            const originalText = exportBtn.innerHTML;
+            exportBtn.innerHTML = '⏳ กำลังบันทึก...';
+            exportBtn.disabled = true;
+
+            html2canvas(captureTarget, {
+                scale: 2, // เพิ่มความละเอียด
+                useCORS: true,
+                backgroundColor: '#ffffff'
+            }).then(canvas => {
+                const link = document.createElement('a');
+                link.download = 'dashboard_screenshot.png';
+                link.href = canvas.toDataURL('image/png');
+                link.click();
+            }).catch(err => {
+                console.error("Error generating screenshot: ", err);
+                alert("เกิดข้อผิดพลาดในการสร้างรูปภาพ");
+            }).finally(() => {
+                exportBtn.innerHTML = originalText;
+                exportBtn.disabled = false;
+            });
+        });
 
     </script>
 </body>
