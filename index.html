@@ -70,17 +70,19 @@
             flex-direction: column;
         }
 
-        .filter-group .choices {
+        .filter-group .choices,
+        .filter-group .vscomp-wrapper {
             flex: 1;
             margin-bottom: 0;
+            width: 100%;
         }
 
         .filter-group .choices__inner {
             height: 100%;
         }
 
-        .filter-group > input,
-        .filter-group > select {
+        .filter-group>input,
+        .filter-group>select {
             flex: 1;
         }
 
@@ -129,6 +131,8 @@
     <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/choices.js/public/assets/styles/choices.min.css" />
     <script src="https://cdn.jsdelivr.net/npm/choices.js/public/assets/scripts/choices.min.js"></script>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/virtual-select-plugin@1.0.44/dist/virtual-select.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/virtual-select-plugin@1.0.44/dist/virtual-select.min.js"></script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
     <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
     <style>
@@ -187,19 +191,19 @@
         <div class="filter-section">
             <div class="filter-group">
                 <label>📅 ประเภทวัน (WKDAY / WKEND)</label>
-                <select id="filter-wkday" multiple placeholder="เลือกทั้งหมด (หากไม่เลือกใดๆ)"></select>
+                <select id="filter-wkday" multiple></select>
             </div>
             <div class="filter-group">
                 <label>📅 วันในสัปดาห์</label>
-                <select id="filter-dayofweek" multiple placeholder="เลือกทั้งหมด (หากไม่เลือกใดๆ)"></select>
+                <select id="filter-dayofweek" multiple></select>
             </div>
             <div class="filter-group">
                 <label>⏰ ช่วงเวลา (รายชั่วโมง)</label>
-                <select id="filter-hour" multiple placeholder="เลือกทั้งหมด (หากไม่เลือกใดๆ)"></select>
+                <select id="filter-hour" multiple></select>
             </div>
             <div class="filter-group">
                 <label>📺 รายการ</label>
-                <select id="filter-program" multiple placeholder="เลือกทั้งหมด (หากไม่เลือกใดๆ)"></select>
+                <select id="filter-program" multiple></select>
             </div>
             <div class="filter-group">
                 <label>🗓️ ช่วงวันที่ (Date Range)</label>
@@ -464,31 +468,34 @@
             const programOptions = mapToChoices(programSet);
 
             const commonConfig = {
-                removeItemButton: true,
-                placeholderValue: 'เลือกทั้งหมด (หากไม่เลือกใดๆ)',
-                searchPlaceholderValue: 'ค้นหา...',
-                shouldSort: false,
-                searchResultLimit: 100,
-                fuseOptions: {
-                    ignoreLocation: true
-                }
+                multiple: true,
+                search: true,
+                placeholder: 'เลือกทั้งหมด (หากไม่เลือกใดๆ)',
+                searchPlaceholderText: 'ค้นหา...',
+                selectAllText: 'เลือกทั้งหมด',
+                optionsSelectedText: 'รายการ',
+                optionSelectedText: 'รายการ',
+                allOptionsSelectedText: 'ทั้งหมด',
+                showValueAsTags: false
             };
 
-            if (choicesInstances.wkday) choicesInstances.wkday.destroy();
-            choicesInstances.wkday = new Choices('#filter-wkday', commonConfig);
-            choicesInstances.wkday.setChoices(wkdayOptions, 'value', 'label', true);
-
-            if (choicesInstances.dayofweek) choicesInstances.dayofweek.destroy();
-            choicesInstances.dayofweek = new Choices('#filter-dayofweek', commonConfig);
-            choicesInstances.dayofweek.setChoices(dayOfWeekOptions, 'value', 'label', true);
-
-            if (choicesInstances.hour) choicesInstances.hour.destroy();
-            choicesInstances.hour = new Choices('#filter-hour', commonConfig);
-            choicesInstances.hour.setChoices(hourOptions, 'value', 'label', true);
-
-            if (choicesInstances.program) choicesInstances.program.destroy();
-            choicesInstances.program = new Choices('#filter-program', commonConfig);
-            choicesInstances.program.setChoices(programOptions, 'value', 'label', true);
+            if (!document.querySelector('#filter-wkday').classList.contains('vscomp-ele') &&
+                !document.querySelector('#filter-wkday').hasAttribute('data-vs')) {
+                VirtualSelect.init({ ele: '#filter-wkday', ...commonConfig, options: wkdayOptions });
+                VirtualSelect.init({ ele: '#filter-dayofweek', ...commonConfig, options: dayOfWeekOptions });
+                VirtualSelect.init({ ele: '#filter-hour', ...commonConfig, options: hourOptions });
+                VirtualSelect.init({ ele: '#filter-program', ...commonConfig, options: programOptions });
+                document.querySelector('#filter-wkday').setAttribute('data-vs', 'true');
+            } else {
+                const updateVS = (id, opts) => {
+                    const el = document.querySelector(id);
+                    if (el && typeof el.setOptions === 'function') el.setOptions(opts);
+                };
+                updateVS('#filter-wkday', wkdayOptions);
+                updateVS('#filter-dayofweek', dayOfWeekOptions);
+                updateVS('#filter-hour', hourOptions);
+                updateVS('#filter-program', programOptions);
+            }
 
             let minGlobalDate = Infinity;
             let maxGlobalDate = -Infinity;
@@ -527,10 +534,21 @@
         }
 
         function getFilteredOptions(excludeFilter) {
-            const selectedWkdays = choicesInstances.wkday.getValue(true);
-            const selectedDayOfWeeks = choicesInstances.dayofweek.getValue(true);
-            const selectedHours = choicesInstances.hour.getValue(true);
-            const selectedPrograms = choicesInstances.program.getValue(true);
+            const getVSValue = (id) => {
+                const el = document.querySelector(id);
+                if (!el) return [];
+                let val = el.value;
+                if (!val) return [];
+                // VirtualSelect might return a single string or an array depending on the state
+                if (typeof val === 'string' && val.trim() !== '') {
+                    return val.split(',').map(v => v.trim());
+                }
+                return Array.isArray(val) ? val : [val];
+            };
+            const selectedWkdays = getVSValue('#filter-wkday');
+            const selectedDayOfWeeks = getVSValue('#filter-dayofweek');
+            const selectedHours = getVSValue('#filter-hour');
+            const selectedPrograms = getVSValue('#filter-program');
 
             const selectedDates = fpInstance ? fpInstance.selectedDates : [];
             let startDate = null;
@@ -559,30 +577,25 @@
             const dataForWkday = getFilteredOptions('wkday');
             const wkdaySet = new Set();
             dataForWkday.forEach(d => { if (d.wkday && d.wkday !== 'Unknown') wkdaySet.add(String(d.wkday)); });
-            const currentWkdays = choicesInstances.wkday.getValue(true);
 
             const dataForDayOfWeek = getFilteredOptions('dayofweek');
             const dayOfWeekSetDynamic = new Set();
             dataForDayOfWeek.forEach(d => { if (d.dayOfWeek && d.dayOfWeek !== 'Unknown') dayOfWeekSetDynamic.add(String(d.dayOfWeek)); });
-            const currentDayOfWeeks = choicesInstances.dayofweek.getValue(true);
 
             const dataForHour = getFilteredOptions('hour');
             const hourSet = new Set();
             dataForHour.forEach(d => { if (d.hour && d.hour !== 'Unknown') hourSet.add(String(d.hour)); });
-            const currentHours = choicesInstances.hour.getValue(true);
 
             const dataForProgram = getFilteredOptions('program');
             const programSet = new Set();
             dataForProgram.forEach(d => { if (d.program && d.program !== 'Unknown') programSet.add(String(d.program)); });
-            const currentPrograms = choicesInstances.program.getValue(true);
 
             const dataForDate = getFilteredOptions('date');
             const allowedDates = new Set();
             dataForDate.forEach(d => { if (d.dateSortKey) allowedDates.add(d.dateSortKey); });
 
-            const mapToChoices = (set, currentSelections) => {
+            const mapToChoices = (set) => {
                 return Array.from(set)
-                    .filter(v => !currentSelections.includes(v))
                     .sort()
                     .map(v => ({
                         value: v,
@@ -590,19 +603,29 @@
                     }));
             };
 
-            const mapToDayOfWeekChoices = (set, currentSelections) => {
+            const mapToDayOfWeekChoices = (set) => {
                 const order = ['จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์', 'อาทิตย์'];
                 return Array.from(set)
-                    .filter(v => !currentSelections.includes(v))
                     .map(v => ({ value: v, label: v, order: order.indexOf(v) }))
                     .sort((a, b) => a.order - b.order)
                     .map(v => ({ value: v.value, label: v.label }));
             };
 
-            choicesInstances.wkday.setChoices(mapToChoices(wkdaySet, currentWkdays), 'value', 'label', true);
-            choicesInstances.dayofweek.setChoices(mapToDayOfWeekChoices(dayOfWeekSetDynamic, currentDayOfWeeks), 'value', 'label', true);
-            choicesInstances.hour.setChoices(mapToChoices(hourSet, currentHours), 'value', 'label', true);
-            choicesInstances.program.setChoices(mapToChoices(programSet, currentPrograms), 'value', 'label', true);
+            const setVSOptions = (id, options) => {
+                const el = document.querySelector(id);
+                if (el && typeof el.setOptions === 'function') {
+                    const currentVal = el.value;
+                    el.setOptions(options);
+                    if (currentVal && (Array.isArray(currentVal) ? currentVal.length > 0 : currentVal !== '')) {
+                        el.setValue(currentVal);
+                    }
+                }
+            };
+
+            setVSOptions('#filter-wkday', mapToChoices(wkdaySet));
+            setVSOptions('#filter-dayofweek', mapToDayOfWeekChoices(dayOfWeekSetDynamic));
+            setVSOptions('#filter-hour', mapToChoices(hourSet));
+            setVSOptions('#filter-program', mapToChoices(programSet));
 
             if (fpInstance) {
                 fpInstance.allowedDates = allowedDates;
@@ -616,16 +639,34 @@
         }
 
         let isUpdatingChoices = false;
+        let updateChoicesTimeout = null;
+        
         function applyFilters() {
             if (isUpdatingChoices) return;
             isUpdatingChoices = true;
+            
             updateDropdownChoices();
-            isUpdatingChoices = false;
+            
+            clearTimeout(updateChoicesTimeout);
+            updateChoicesTimeout = setTimeout(() => {
+                isUpdatingChoices = false;
+            }, 100);
 
-            const selectedWkdays = choicesInstances.wkday.getValue(true);
-            const selectedDayOfWeeks = choicesInstances.dayofweek.getValue(true);
-            const selectedHours = choicesInstances.hour.getValue(true);
-            const selectedPrograms = choicesInstances.program.getValue(true);
+            const getVSValue = (id) => {
+                const el = document.querySelector(id);
+                if (!el) return [];
+                let val = el.value;
+                if (!val) return [];
+                if (typeof val === 'string' && val.trim() !== '') {
+                    return val.split(',').map(v => v.trim());
+                }
+                return Array.isArray(val) ? val : [val];
+            };
+
+            const selectedWkdays = getVSValue('#filter-wkday');
+            const selectedDayOfWeeks = getVSValue('#filter-dayofweek');
+            const selectedHours = getVSValue('#filter-hour');
+            const selectedPrograms = getVSValue('#filter-program');
 
             const selectedDates = fpInstance ? fpInstance.selectedDates : [];
             let startDate = null;
@@ -840,7 +881,7 @@
                         const days = ['อาทิตย์', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์'];
                         const months = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
                         dateLabel = `วัน${days[dObj.getDay()]}ที่ ${parseInt(parts[0], 10)} ${months[dObj.getMonth()]} ${parts[2]}`;
-                        
+
                         const dayColors = [
                             '#e74c3c', // Sunday (Red)
                             '#f1c40f', // Monday (Yellow)
