@@ -223,6 +223,11 @@
 
         <!-- The Main Canvas -->
         <div id="chart-wrapper">
+            <select id="mainChartTypeSelect"
+                style="position: absolute; top: 10px; right: 20px; z-index: 10; padding: 5px 10px; border-radius: 4px; border: 1px solid #ccc; font-size: 12px; background: white; cursor: pointer; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                <option value="sum">ผลรวม (SUM)</option>
+                <option value="avg">ค่าเฉลี่ย (AVG)</option>
+            </select>
             <canvas id="mainTimeSeriesChart"></canvas>
         </div>
         <div id="chart-wrapper">
@@ -261,6 +266,7 @@
             shouldSort: false
         });
         document.getElementById('chart-timeframe').addEventListener('change', applyFilters);
+        document.getElementById('mainChartTypeSelect').addEventListener('change', applyFilters);
 
         function loadData(password) {
             let sheetId, sheetName;
@@ -640,13 +646,13 @@
 
         let isUpdatingChoices = false;
         let updateChoicesTimeout = null;
-        
+
         function applyFilters() {
             if (isUpdatingChoices) return;
             isUpdatingChoices = true;
-            
+
             updateDropdownChoices();
-            
+
             clearTimeout(updateChoicesTimeout);
             updateChoicesTimeout = setTimeout(() => {
                 isUpdatingChoices = false;
@@ -693,6 +699,7 @@
 
             // 1 & 2. Main Time Series Aggregation (Dynamic)
             const timeframe = document.getElementById('chart-timeframe').value;
+            const mainChartType = document.getElementById('mainChartTypeSelect').value;
             const aggregatedMain = {};
             let chartTitle = '';
 
@@ -710,41 +717,41 @@
                 }
 
                 if (!aggregatedMain[key]) {
-                    aggregatedMain[key] = { label: key, sortKey: sortKey, y: 0, reach: 0 };
+                    aggregatedMain[key] = { label: key, sortKey: sortKey, y: 0, reach: 0, count: 0 };
                 }
                 aggregatedMain[key].y += (d.y || 0);
                 aggregatedMain[key].reach += (d.reach || 0);
+                aggregatedMain[key].count += 1;
             });
 
-            if (timeframe === '10min') chartTitle = 'จำนวนเครื่องรับชมสะสม10นาที และ จำนวนเครื่องรวม(เข้าถึง): ราย 10 นาที';
-            else if (timeframe === 'hourly') chartTitle = 'จำนวนเครื่องรับชมสะสม10นาที และ จำนวนเครื่องรวม(เข้าถึง): รายชั่วโมง';
-            else if (timeframe === 'daily') chartTitle = 'จำนวนเครื่องรับชมสะสม10นาที และ จำนวนเครื่องรวม(เข้าถึง): รายวัน';
+            let chartTitlePrefix = mainChartType === 'avg' ? 'ค่าเฉลี่ย' : 'ผลรวม';
+            if (timeframe === '10min') chartTitle = `${chartTitlePrefix}จำนวนเครื่องรับชมสะสม10นาที และ จำนวนเครื่องรวม(เข้าถึง): ราย 10 นาที`;
+            else if (timeframe === 'hourly') chartTitle = `${chartTitlePrefix}จำนวนเครื่องรับชมสะสม10นาที และ จำนวนเครื่องรวม(เข้าถึง): รายชั่วโมง`;
+            else if (timeframe === 'daily') chartTitle = `${chartTitlePrefix}จำนวนเครื่องรับชมสะสม10นาที และ จำนวนเครื่องรวม(เข้าถึง): รายวัน`;
 
-            const mainData = Object.values(aggregatedMain);
+            const mainData = Object.values(aggregatedMain).map(item => {
+                return {
+                    label: item.label,
+                    sortKey: item.sortKey,
+                    y: mainChartType === 'avg' ? (item.y / item.count) : item.y,
+                    reach: mainChartType === 'avg' ? (item.reach / item.count) : item.reach
+                };
+            });
             mainData.sort((a, b) => a.sortKey - b.sortKey);
-            renderMainTimeSeriesChart(mainData, chartTitle);
+            renderMainTimeSeriesChart(mainData, chartTitle, mainChartType);
 
             // 3. Program Daily Aggregation (Stacked Bar)
             const totalViewerCanvas = document.getElementById('totalViewerChartDaily');
             if (selectedPrograms.length > 0) {
                 totalViewerCanvas.parentElement.style.display = 'block';
 
-                const timeframe = document.getElementById('chart-timeframe').value;
                 const aggregatedProgram = {};
                 const uniqueTimeKeysMap = new Map();
                 const uniquePrograms = new Set();
 
                 filteredData.forEach(d => {
-                    let groupByKey = d.dateSortKey + (d.sortKey * 60000); // Chronological sort
-                    let displayLabel = `${d.date} ${d.time_interval}`;
-
-                    if (timeframe === 'hourly') {
-                        displayLabel = `${d.date} ${d.hour}`;
-                        // Keep chronological sortKey based on the first interval of this hour
-                    } else if (timeframe === 'daily') {
-                        displayLabel = d.date;
-                        groupByKey = d.dateSortKey;
-                    }
+                    let groupByKey = d.dateSortKey;
+                    let displayLabel = d.date;
 
                     if (!uniqueTimeKeysMap.has(displayLabel)) {
                         uniqueTimeKeysMap.set(displayLabel, groupByKey);
@@ -783,14 +790,8 @@
                     };
                 });
 
-                let programChartTitle = 'ยอดวิวของแต่ละรายการ: ราย 10 นาที';
-                let xAxisLabel = 'เวลา (Time)';
-                if (timeframe === 'hourly') {
-                    programChartTitle = 'ยอดวิวของแต่ละรายการ: รายชั่วโมง';
-                } else if (timeframe === 'daily') {
-                    programChartTitle = 'ยอดวิวของแต่ละรายการ: รายวัน';
-                    xAxisLabel = 'วันที่ (Date)';
-                }
+                let programChartTitle = 'ยอดวิวของแต่ละรายการ: รายวัน';
+                let xAxisLabel = 'วันที่ (Date)';
 
                 renderTotalViewerChartDaily(sortedTimeLabels, datasetsProgram, programChartTitle, xAxisLabel);
             } else {
@@ -939,7 +940,7 @@
         let chartCategoryInstance = null;
         let chartAgencyInstance = null;
 
-        function renderMainTimeSeriesChart(dataPoints, chartTitle) {
+        function renderMainTimeSeriesChart(dataPoints, chartTitle, mainChartType = 'sum') {
             const ctx = document.getElementById('mainTimeSeriesChart').getContext('2d');
 
             if (chartMainInstance) {
@@ -952,7 +953,7 @@
                     labels: dataPoints.map(d => d.label),
                     datasets: [
                         {
-                            label: 'ผลรวมจำนวนเครื่องรับชมสะสม 10 นาที',
+                            label: mainChartType === 'avg' ? 'ค่าเฉลี่ยจำนวนเครื่องรับชมสะสม 10 นาที' : 'ผลรวมจำนวนเครื่องรับชมสะสม 10 นาที',
                             data: dataPoints.map(d => d.y),
                             borderColor: '#4CAF50',
                             backgroundColor: 'rgba(76, 175, 80, 0.2)',
@@ -963,7 +964,7 @@
                             pointHoverRadius: 6
                         },
                         {
-                            label: 'ผลรวมจำนวนเครื่องรวมที่เข้าถึง',
+                            label: mainChartType === 'avg' ? 'ค่าเฉลี่ยจำนวนเครื่องรวมที่เข้าถึง' : 'ผลรวมจำนวนเครื่องรวมที่เข้าถึง',
                             data: dataPoints.map(d => d.reach),
                             borderColor: '#2196F3',
                             backgroundColor: 'rgba(33, 150, 243, 0.2)',
@@ -997,7 +998,7 @@
                             beginAtZero: true,
                             title: {
                                 display: true,
-                                text: 'ผลรวมจำนวนผู้ชม (Sum)'
+                                text: mainChartType === 'avg' ? 'ค่าเฉลี่ยจำนวนผู้ชม (Average)' : 'ผลรวมจำนวนผู้ชม (Sum)'
                             }
                         }
                     },
@@ -1020,7 +1021,10 @@
                                 size: 11
                             },
                             formatter: function (value) {
-                                return value > 0 ? value.toLocaleString() : '';
+                                if (value > 0) {
+                                    return mainChartType === 'avg' ? value.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : value.toLocaleString();
+                                }
+                                return '';
                             }
                         },
                         tooltip: {
@@ -1031,7 +1035,7 @@
                                         label += ': ';
                                     }
                                     if (context.parsed.y !== null) {
-                                        label += context.parsed.y.toLocaleString();
+                                        label += mainChartType === 'avg' ? context.parsed.y.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : context.parsed.y.toLocaleString();
                                     }
                                     return label;
                                 }
