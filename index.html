@@ -753,8 +753,8 @@
                 return {
                     label: item.label,
                     sortKey: item.sortKey,
-                    y: mainChartType === 'avg' ? (item.y / item.count) : item.y,
-                    reach: mainChartType === 'avg' ? (item.reach / item.count) : item.reach
+                    y: Math.floor(mainChartType === 'avg' ? (item.y / item.count) : item.y),
+                    reach: Math.floor(mainChartType === 'avg' ? (item.reach / item.count) : item.reach)
                 };
             });
             mainData.sort((a, b) => a.sortKey - b.sortKey);
@@ -800,7 +800,7 @@
                     const data = sortedTimeLabels.map(timeLabel => {
                         const key = `${timeLabel}_${prog}`;
                         if (aggregatedProgram[key]) {
-                            return globalChartType === 'avg' ? (aggregatedProgram[key].sum / aggregatedProgram[key].count) : aggregatedProgram[key].sum;
+                            return Math.floor(globalChartType === 'avg' ? (aggregatedProgram[key].sum / aggregatedProgram[key].count) : aggregatedProgram[key].sum);
                         }
                         return 0;
                     });
@@ -838,7 +838,7 @@
             });
             const categoryLabels = Object.keys(aggregatedCategory);
             const categoryData = Object.values(aggregatedCategory).map(item => {
-                return globalChartType === 'avg' ? (item.sum / item.count) : item.sum;
+                return Math.floor(globalChartType === 'avg' ? (item.sum / item.count) : item.sum);
             });
             let pieChartTitle = globalChartType === 'avg' ? 'สัดส่วนค่าเฉลี่ยยอดวิวแยกตามประเภทรายการ' : 'สัดส่วนยอดวิวรวมแยกตามประเภทรายการ';
             renderCategoryPieChart(categoryLabels, categoryData, pieChartTitle, globalChartType);
@@ -847,6 +847,7 @@
             const aggregatedMonth = {};
             const uniqueMonthsMap = new Map();
             const uniqueProgramsMonth = new Set();
+            const programTotalSum = {};
 
             filteredData.forEach(d => {
                 const parts = d.date.split('/');
@@ -869,6 +870,11 @@
                         aggregatedMonth[key] = 0;
                     }
                     aggregatedMonth[key] += (d.y || 0);
+
+                    if (!programTotalSum[progKey]) {
+                        programTotalSum[progKey] = 0;
+                    }
+                    programTotalSum[progKey] += (d.y || 0);
                 }
             });
 
@@ -877,6 +883,7 @@
                 const keyB = uniqueMonthsMap.get(b);
                 return keyA.localeCompare(keyB);
             });
+            const numMonths = sortedMonthLabels.length || 1;
 
             let datasetsMonth = [];
 
@@ -889,7 +896,10 @@
 
                     const data = sortedMonthLabels.map(monthLabel => {
                         const key = `${monthLabel}_${prog}`;
-                        return aggregatedMonth[key] || 0;
+                        if (globalChartType === 'avg') {
+                            return Math.floor(programTotalSum[prog] / numMonths);
+                        }
+                        return Math.floor(aggregatedMonth[key] || 0);
                     });
 
                     return {
@@ -903,7 +913,10 @@
             } else {
                 const data = sortedMonthLabels.map(monthLabel => {
                     const key = `${monthLabel}_Total`;
-                    return aggregatedMonth[key] || 0;
+                    if (globalChartType === 'avg') {
+                        return Math.floor(programTotalSum['Total'] / numMonths);
+                    }
+                    return Math.floor(aggregatedMonth[key] || 0);
                 });
 
                 const backgroundColors = sortedMonthLabels.map((_, i) => `hsla(${((i * 50) + 250) % 360}, 70%, 50%, 0.7)`);
@@ -986,7 +999,7 @@
                         const key = `${dateStr}_${timeStr}`;
                         if (aggregatedStepped[key]) {
                             let val = globalChartType === 'avg' ? (aggregatedStepped[key].sum / aggregatedStepped[key].count) : aggregatedStepped[key].sum;
-                            return Math.round(val);
+                            return Math.floor(val);
                         }
                         return null;
                     });
@@ -1110,7 +1123,7 @@
                             },
                             formatter: function (value) {
                                 if (value > 0) {
-                                    return mainChartType === 'avg' ? value.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : value.toLocaleString();
+                                    return value.toLocaleString();
                                 }
                                 return '';
                             }
@@ -1123,7 +1136,7 @@
                                         label += ': ';
                                     }
                                     if (context.parsed.y !== null) {
-                                        label += mainChartType === 'avg' ? context.parsed.y.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : context.parsed.y.toLocaleString();
+                                        label += context.parsed.y.toLocaleString();
                                     }
                                     return label;
                                 }
@@ -1200,7 +1213,7 @@
                                         label += ': ';
                                     }
                                     if (context.parsed.y !== null) {
-                                        label += globalChartType === 'avg' ? context.parsed.y.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : context.parsed.y.toLocaleString();
+                                        label += context.parsed.y.toLocaleString();
                                     }
                                     return label;
                                 }
@@ -1223,7 +1236,7 @@
                             textStrokeColor: 'rgba(0,0,0,0.5)',
                             textStrokeWidth: 2,
                             formatter: function (value) {
-                                return globalChartType === 'avg' ? value.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : value.toLocaleString();
+                                return value.toLocaleString();
                             }
                         }
                     }
@@ -1291,7 +1304,7 @@
                                 const total = context.chart._metasets[context.datasetIndex].total;
                                 if (total === 0) return '';
                                 const percentage = ((value / total) * 100).toFixed(1) + '%';
-                                const formattedVal = globalChartType === 'avg' ? value.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : value.toLocaleString();
+                                const formattedVal = value.toLocaleString();
                                 return percentage + '\n(' + formattedVal + ')';
                             },
                             textAlign: 'center'
@@ -1304,7 +1317,7 @@
                                         label += ': ';
                                     }
                                     if (context.parsed !== null) {
-                                        label += (globalChartType === 'avg' ? context.parsed.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : context.parsed.toLocaleString()) + ' วิว';
+                                        label += context.parsed.toLocaleString() + ' วิว';
                                     }
                                     return label;
                                 }
@@ -1376,7 +1389,7 @@
                             textStrokeColor: 'rgba(0,0,0,0.5)',
                             textStrokeWidth: 2,
                             formatter: function (value) {
-                                return globalChartType === 'avg' ? value.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : value.toLocaleString();
+                                return value.toLocaleString();
                             }
                         },
                         legend: {
@@ -1399,7 +1412,7 @@
                                         label = '';
                                     }
                                     if (context.parsed.y !== null) {
-                                        label += globalChartType === 'avg' ? context.parsed.y.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : context.parsed.y.toLocaleString();
+                                        label += context.parsed.y.toLocaleString();
                                     }
                                     return label;
                                 }
@@ -1467,7 +1480,7 @@
                                 size: 11
                             },
                             formatter: function (value) {
-                                return value !== null ? (globalChartType === 'avg' ? value.toLocaleString(undefined, { minimumFractionDigits: 1, maximumFractionDigits: 1 }) : value.toLocaleString()) : '';
+                                return value !== null ? value.toLocaleString() : '';
                             }
                         },
                         legend: {
