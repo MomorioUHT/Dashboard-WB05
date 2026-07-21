@@ -817,14 +817,14 @@
             const categoryReachData = Object.values(aggregatedCategory).map(item => {
                 return Math.floor(globalChartType === 'avg' ? (item.reach / item.count) : item.reach);
             });
+            const categoryCountData = Object.values(aggregatedCategory).map(item => item.count);
             let pieChartTitle = globalChartType === 'avg' ? 'สัดส่วนยอด Engagement เฉลี่ย: แยกตามประเภทรายการ' : 'สัดส่วนยอด Engagement รวม: แยกตามประเภทรายการ';
-            renderCategoryPieChart(categoryLabels, categoryData, categoryReachData, pieChartTitle, globalChartType);
+            renderCategoryPieChart(categoryLabels, categoryData, categoryReachData, pieChartTitle, globalChartType, categoryCountData);
 
             // 5. Monthly Aggregation (Bar Chart)
             const aggregatedMonth = {};
             const uniqueMonthsMap = new Map();
             const uniqueProgramsMonth = new Set();
-            const programTotalSum = {};
 
             filteredData.forEach(d => {
                 const parts = d.date.split('/');
@@ -844,17 +844,13 @@
 
                     const key = `${monthYear}_${progKey}`;
                     if (!aggregatedMonth[key]) {
-                        aggregatedMonth[key] = { views: 0, reach: 0, count: 0 };
+                        aggregatedMonth[key] = { dailyData: {} };
                     }
-                    aggregatedMonth[key].views += (d.y || 0);
-                    aggregatedMonth[key].reach += (d.reach || 0);
-                    aggregatedMonth[key].count += 1;
-
-                    if (!programTotalSum[progKey]) {
-                        programTotalSum[progKey] = { views: 0, reach: 0 };
+                    if (!aggregatedMonth[key].dailyData[d.date]) {
+                        aggregatedMonth[key].dailyData[d.date] = { views: 0, count: 0 };
                     }
-                    programTotalSum[progKey].views += (d.y || 0);
-                    programTotalSum[progKey].reach += (d.reach || 0);
+                    aggregatedMonth[key].dailyData[d.date].views += (d.y || 0);
+                    aggregatedMonth[key].dailyData[d.date].count += 1;
                 }
             });
 
@@ -863,14 +859,12 @@
                 const keyB = uniqueMonthsMap.get(b);
                 return keyA.localeCompare(keyB);
             });
-            const numMonths = sortedMonthLabels.length || 1;
 
             let datasetsMonth = [];
 
             if (selectedPrograms.length > 0) {
                 const programsM = Array.from(uniqueProgramsMonth).sort();
 
-                // Views Stack
                 programsM.forEach((prog, index) => {
                     const hue = (index * 137.5) % 360;
                     const color = `hsl(${hue}, 70%, 50%)`;
@@ -878,86 +872,72 @@
 
                     const dataViews = sortedMonthLabels.map(monthLabel => {
                         const key = `${monthLabel}_${prog}`;
-                        if (globalChartType === 'avg') {
-                            return Math.floor(programTotalSum[prog] ? (programTotalSum[prog].views / numMonths) : 0);
-                        }
                         const item = aggregatedMonth[key];
-                        return Math.floor(item ? item.views : 0);
+                        if (item) {
+                            let totalViews = 0;
+                            let dailyAveragesSum = 0;
+                            let numDays = 0;
+                            for (const date in item.dailyData) {
+                                const dData = item.dailyData[date];
+                                totalViews += dData.views;
+                                dailyAveragesSum += (dData.views / dData.count);
+                                numDays += 1;
+                            }
+
+                            if (globalChartType === 'avg') {
+                                return numDays > 0 ? Math.floor(dailyAveragesSum / numDays) : 0;
+                            }
+                            return Math.floor(totalViews);
+                        }
+                        return 0;
                     });
 
                     datasetsMonth.push({
-                        label: `${prog} (รับชมสะสม)`,
+                        label: prog,
                         data: dataViews,
                         backgroundColor: bgColor,
                         borderColor: color,
-                        borderWidth: 1,
-                        stack: 'Views'
-                    });
-                });
-
-                // Reach Stack
-                programsM.forEach((prog, index) => {
-                    const hue = (index * 137.5) % 360;
-                    const colorReach = `hsl(${hue}, 70%, 30%)`;
-                    const bgColorReach = `hsla(${hue}, 70%, 30%, 0.7)`;
-
-                    const dataReach = sortedMonthLabels.map(monthLabel => {
-                        const key = `${monthLabel}_${prog}`;
-                        if (globalChartType === 'avg') {
-                            return Math.floor(programTotalSum[prog] ? (programTotalSum[prog].reach / numMonths) : 0);
-                        }
-                        const item = aggregatedMonth[key];
-                        return Math.floor(item ? item.reach : 0);
-                    });
-
-                    datasetsMonth.push({
-                        label: `${prog} (เครื่องที่เข้าถึง)`,
-                        data: dataReach,
-                        backgroundColor: bgColorReach,
-                        borderColor: colorReach,
-                        borderWidth: 1,
-                        stack: 'Reach'
+                        borderWidth: 1
                     });
                 });
             } else {
                 const dataViews = sortedMonthLabels.map(monthLabel => {
                     const key = `${monthLabel}_Total`;
-                    if (globalChartType === 'avg') {
-                        return Math.floor(programTotalSum['Total'] ? (programTotalSum['Total'].views / numMonths) : 0);
-                    }
                     const item = aggregatedMonth[key];
-                    return Math.floor(item ? item.views : 0);
-                });
-                const dataReach = sortedMonthLabels.map(monthLabel => {
-                    const key = `${monthLabel}_Total`;
-                    if (globalChartType === 'avg') {
-                        return Math.floor(programTotalSum['Total'] ? (programTotalSum['Total'].reach / numMonths) : 0);
+                    if (item) {
+                        let totalViews = 0;
+                        let dailyAveragesSum = 0;
+                        let numDays = 0;
+                        for (const date in item.dailyData) {
+                            const dData = item.dailyData[date];
+                            totalViews += dData.views;
+                            dailyAveragesSum += (dData.views / dData.count);
+                            numDays += 1;
+                        }
+
+                        if (globalChartType === 'avg') {
+                            return numDays > 0 ? Math.floor(dailyAveragesSum / numDays) : 0;
+                        }
+                        return Math.floor(totalViews);
                     }
-                    const item = aggregatedMonth[key];
-                    return Math.floor(item ? item.reach : 0);
+                    return 0;
                 });
+
+                const backgroundColors = sortedMonthLabels.map((_, i) => `hsla(${((i * 50) + 250) % 360}, 70%, 50%, 0.7)`);
+                const borderColors = sortedMonthLabels.map((_, i) => `hsl(${((i * 50) + 250) % 360}, 70%, 50%)`);
 
                 datasetsMonth = [
                     {
-                        label: globalChartType === 'avg' ? 'ค่าเฉลี่ยจำนวนเครื่องรับชมสะสม' : 'จำนวนเครื่องรับชมสะสม',
+                        label: globalChartType === 'avg' ? 'ค่าเฉลี่ยจำนวนเครื่องรับชมสะสม' : 'ผลรวมจำนวนเครื่องรับชมสะสม',
                         data: dataViews,
-                        backgroundColor: 'rgba(76, 175, 80, 0.7)',
-                        borderColor: '#4CAF50',
-                        borderWidth: 1,
-                        stack: 'Views'
-                    },
-                    {
-                        label: globalChartType === 'avg' ? 'ค่าเฉลี่ยจำนวนเครื่องที่เข้าถึง' : 'จำนวนเครื่องที่เข้าถึง',
-                        data: dataReach,
-                        backgroundColor: 'rgba(33, 150, 243, 0.7)',
-                        borderColor: '#2196F3',
-                        borderWidth: 1,
-                        stack: 'Reach'
+                        backgroundColor: backgroundColors,
+                        borderColor: borderColors,
+                        borderWidth: 1
                     }
                 ];
             }
 
-            renderMonthlyBarChart(sortedMonthLabels, datasetsMonth, true, globalChartType);
+            renderMonthlyBarChart(sortedMonthLabels, datasetsMonth, selectedPrograms.length > 0, globalChartType);
 
             // 6. Stepped Time Series Chart (by Date and Time)
             const steppedContainer = document.getElementById('steppedChartContainer');
@@ -1005,20 +985,6 @@
                         const days = ['อาทิตย์', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์'];
                         const months = ['มกราคม', 'กุมภาพันธ์', 'มีนาคม', 'เมษายน', 'พฤษภาคม', 'มิถุนายน', 'กรกฎาคม', 'สิงหาคม', 'กันยายน', 'ตุลาคม', 'พฤศจิกายน', 'ธันวาคม'];
                         dateLabel = `วัน${days[dObj.getDay()]}ที่ ${parseInt(parts[0], 10)} ${months[dObj.getMonth()]} ${parts[2]}`;
-
-                        // ถ้าไม่ได้เลือกแค่วันเดียว ให้ Fix สีตามวันในสัปดาห์
-                        if (selectedDayOfWeeks.length !== 1) {
-                            const dayColors = [
-                                '#e74c3c', // Sunday (Red)
-                                '#f1c40f', // Monday (Yellow)
-                                '#e84393', // Tuesday (Pink)
-                                '#2ecc71', // Wednesday (Green)
-                                '#e67e22', // Thursday (Orange)
-                                '#3498db', // Friday (Blue)
-                                '#9b59b6'  // Saturday (Purple)
-                            ];
-                            color = dayColors[dObj.getDay()];
-                        }
                     }
 
                     const data = sortedTimes.map(timeStr => {
@@ -1270,7 +1236,7 @@
             });
         }
 
-        function renderCategoryPieChart(labels, data, reachData, chartTitle, globalChartType = 'sum') {
+        function renderCategoryPieChart(labels, data, reachData, chartTitle, globalChartType = 'sum', countData = []) {
             const ctx = document.getElementById('categoryPieChart').getContext('2d');
 
             if (chartCategoryInstance) {
@@ -1287,6 +1253,7 @@
                     datasets: [{
                         data: data,
                         reachData: reachData,
+                        countData: countData,
                         backgroundColor: backgroundColors,
                         borderWidth: 1
                     }]
@@ -1346,6 +1313,7 @@
                                     const index = context.dataIndex;
                                     const value = dataset.data[index] || 0;
                                     const reachValue = dataset.reachData ? (dataset.reachData[index] || 0) : 0;
+                                    const countValue = dataset.countData ? (dataset.countData[index] || 0) : 0;
 
                                     const total = context.chart._metasets[context.datasetIndex].total;
                                     const percentage = total === 0 ? 0 : Math.round((value / total) * 100);
@@ -1356,9 +1324,37 @@
                                     }
                                     const reachPercentage = totalReach === 0 ? 0 : Math.round((reachValue / totalReach) * 100);
 
+                                    let totalCount = 0;
+                                    if (dataset.countData) {
+                                        totalCount = dataset.countData.reduce((a, b) => a + b, 0);
+                                    }
+                                    const countPercentage = totalCount === 0 ? 0 : Math.round((countValue / totalCount) * 100);
+
+                                    const totalMinutes = countValue * 10;
+                                    const totalHoursFloat = totalMinutes / 60;
+                                    
+                                    const months = Math.floor(totalMinutes / (30 * 24 * 60));
+                                    let remainingMinutes = totalMinutes % (30 * 24 * 60);
+
+                                    const days = Math.floor(remainingMinutes / (24 * 60));
+                                    remainingMinutes = remainingMinutes % (24 * 60);
+
+                                    const hours = Math.floor(remainingMinutes / 60);
+                                    const minutes = remainingMinutes % 60;
+
+                                    let durationParts = [];
+                                    if (months > 0) durationParts.push(`${months} เดือน`);
+                                    if (days > 0) durationParts.push(`${days} วัน`);
+                                    if (hours > 0) durationParts.push(`${hours} ชั่วโมง`);
+                                    if (minutes > 0) durationParts.push(`${minutes} นาที`);
+                                    const durationStr = durationParts.length > 0 ? durationParts.join(' ') : '0 นาที';
+                                    
+                                    let formattedTotalHours = totalHoursFloat % 1 === 0 ? totalHoursFloat : totalHoursFloat.toFixed(1);
+
                                     return [
                                         `จำนวนเครื่องรับชมสะสม: ${value.toLocaleString()} (${percentage}%)`,
-                                        `จำนวนเครื่องที่เข้าถึง: ${reachValue.toLocaleString()} (${reachPercentage}%)`
+                                        `จำนวนเครื่องที่เข้าถึง: ${reachValue.toLocaleString()} (${reachPercentage}%)`,
+                                        `ชั่วโมงออกอากาศรวม ${formattedTotalHours} ชั่วโมง (${durationStr}) คิดเป็น (${countPercentage}%)`
                                     ];
                                 }
                             }
