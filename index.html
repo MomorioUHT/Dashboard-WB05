@@ -173,7 +173,7 @@
     <div class="dashboard-card" id="dashboard-content" style="display: none;">
         <div
             style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; flex-wrap: wrap; gap: 10px;">
-            <h2 style="margin: 0;">📊 รายงานผู้ชม (ผลรวมตามช่วงเวลา)</h2>
+            <h2 style="margin: 0;">📊 รายงาน Engagement ของ ThaiPBS ในแต่ละช่วงเวลา</h2>
             <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
                 <select id="globalChartTypeSelect"
                     style="padding: 8px 12px; border-radius: 4px; border: 1px solid #ccc; font-size: 14px; background: white; cursor: pointer; font-weight: bold; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
@@ -717,10 +717,10 @@
                 aggregatedMain[key].count += 1;
             });
 
-            let chartTitlePrefix = mainChartType === 'avg' ? 'ค่าเฉลี่ย' : 'ผลรวม';
-            if (timeframe === '10min') chartTitle = `${chartTitlePrefix}จำนวนเครื่องรับชมสะสม10นาที และ จำนวนเครื่องรวม(เข้าถึง): ราย 10 นาที`;
-            else if (timeframe === 'hourly') chartTitle = `${chartTitlePrefix}จำนวนเครื่องรับชมสะสม10นาที และ จำนวนเครื่องรวม(เข้าถึง): รายชั่วโมง`;
-            else if (timeframe === 'daily') chartTitle = `${chartTitlePrefix}จำนวนเครื่องรับชมสะสม10นาที และ จำนวนเครื่องรวม(เข้าถึง): รายวัน`;
+            let chartTitlePrefix = mainChartType === 'avg' ? 'เฉลี่ย' : 'รวม';
+            if (timeframe === '10min') chartTitle = `สรุปยอด Engagement ${chartTitlePrefix}: ราย 10 นาที`;
+            else if (timeframe === 'hourly') chartTitle = `สรุปยอด Engagement ${chartTitlePrefix}: รายชั่วโมง`;
+            else if (timeframe === 'daily') chartTitle = `สรุปยอด Engagement ${chartTitlePrefix}: รายวัน`;
 
             const mainData = Object.values(aggregatedMain).map(item => {
                 return {
@@ -787,7 +787,7 @@
                     };
                 });
 
-                let programChartTitle = globalChartType === 'avg' ? 'ค่าเฉลี่ยยอดวิวของแต่ละรายการ: รายวัน' : 'ผลรวมยอดวิวของแต่ละรายการ: รายวัน';
+                let programChartTitle = globalChartType === 'avg' ? 'ยอดวิวเฉลี่ยของแต่ละรายการ: รายวัน' : 'ยอดวิวรวมของแต่ละรายการ: รายวัน';
                 let xAxisLabel = 'วันที่ (Date)';
 
                 renderTotalViewerChartDaily(sortedTimeLabels, datasetsProgram, programChartTitle, xAxisLabel, globalChartType);
@@ -804,17 +804,21 @@
             filteredData.forEach(d => {
                 const key = d.category;
                 if (!aggregatedCategory[key]) {
-                    aggregatedCategory[key] = { sum: 0, count: 0 };
+                    aggregatedCategory[key] = { sum: 0, reach: 0, count: 0 };
                 }
                 aggregatedCategory[key].sum += (d.y || 0); // Use views
+                aggregatedCategory[key].reach += (d.reach || 0);
                 aggregatedCategory[key].count += 1;
             });
             const categoryLabels = Object.keys(aggregatedCategory);
             const categoryData = Object.values(aggregatedCategory).map(item => {
                 return Math.floor(globalChartType === 'avg' ? (item.sum / item.count) : item.sum);
             });
-            let pieChartTitle = globalChartType === 'avg' ? 'สัดส่วนค่าเฉลี่ยยอดวิวแยกตามประเภทรายการ' : 'สัดส่วนยอดวิวรวมแยกตามประเภทรายการ';
-            renderCategoryPieChart(categoryLabels, categoryData, pieChartTitle, globalChartType);
+            const categoryReachData = Object.values(aggregatedCategory).map(item => {
+                return Math.floor(globalChartType === 'avg' ? (item.reach / item.count) : item.reach);
+            });
+            let pieChartTitle = globalChartType === 'avg' ? 'สัดส่วนยอด Engagement เฉลี่ย: แยกตามประเภทรายการ' : 'สัดส่วนยอด Engagement รวม: แยกตามประเภทรายการ';
+            renderCategoryPieChart(categoryLabels, categoryData, categoryReachData, pieChartTitle, globalChartType);
 
             // 5. Monthly Aggregation (Bar Chart)
             const aggregatedMonth = {};
@@ -840,14 +844,17 @@
 
                     const key = `${monthYear}_${progKey}`;
                     if (!aggregatedMonth[key]) {
-                        aggregatedMonth[key] = 0;
+                        aggregatedMonth[key] = { views: 0, reach: 0, count: 0 };
                     }
-                    aggregatedMonth[key] += (d.y || 0);
+                    aggregatedMonth[key].views += (d.y || 0);
+                    aggregatedMonth[key].reach += (d.reach || 0);
+                    aggregatedMonth[key].count += 1;
 
                     if (!programTotalSum[progKey]) {
-                        programTotalSum[progKey] = 0;
+                        programTotalSum[progKey] = { views: 0, reach: 0 };
                     }
-                    programTotalSum[progKey] += (d.y || 0);
+                    programTotalSum[progKey].views += (d.y || 0);
+                    programTotalSum[progKey].reach += (d.reach || 0);
                 }
             });
 
@@ -862,49 +869,95 @@
 
             if (selectedPrograms.length > 0) {
                 const programsM = Array.from(uniqueProgramsMonth).sort();
-                datasetsMonth = programsM.map((prog, index) => {
+
+                // Views Stack
+                programsM.forEach((prog, index) => {
                     const hue = (index * 137.5) % 360;
                     const color = `hsl(${hue}, 70%, 50%)`;
                     const bgColor = `hsla(${hue}, 70%, 50%, 0.7)`;
 
-                    const data = sortedMonthLabels.map(monthLabel => {
+                    const dataViews = sortedMonthLabels.map(monthLabel => {
                         const key = `${monthLabel}_${prog}`;
                         if (globalChartType === 'avg') {
-                            return Math.floor(programTotalSum[prog] / numMonths);
+                            return Math.floor(programTotalSum[prog] ? (programTotalSum[prog].views / numMonths) : 0);
                         }
-                        return Math.floor(aggregatedMonth[key] || 0);
+                        const item = aggregatedMonth[key];
+                        return Math.floor(item ? item.views : 0);
                     });
 
-                    return {
-                        label: prog,
-                        data: data,
+                    datasetsMonth.push({
+                        label: `${prog} (รับชมสะสม)`,
+                        data: dataViews,
                         backgroundColor: bgColor,
                         borderColor: color,
-                        borderWidth: 1
-                    };
+                        borderWidth: 1,
+                        stack: 'Views'
+                    });
+                });
+
+                // Reach Stack
+                programsM.forEach((prog, index) => {
+                    const hue = (index * 137.5) % 360;
+                    const colorReach = `hsl(${hue}, 70%, 30%)`;
+                    const bgColorReach = `hsla(${hue}, 70%, 30%, 0.7)`;
+
+                    const dataReach = sortedMonthLabels.map(monthLabel => {
+                        const key = `${monthLabel}_${prog}`;
+                        if (globalChartType === 'avg') {
+                            return Math.floor(programTotalSum[prog] ? (programTotalSum[prog].reach / numMonths) : 0);
+                        }
+                        const item = aggregatedMonth[key];
+                        return Math.floor(item ? item.reach : 0);
+                    });
+
+                    datasetsMonth.push({
+                        label: `${prog} (เครื่องที่เข้าถึง)`,
+                        data: dataReach,
+                        backgroundColor: bgColorReach,
+                        borderColor: colorReach,
+                        borderWidth: 1,
+                        stack: 'Reach'
+                    });
                 });
             } else {
-                const data = sortedMonthLabels.map(monthLabel => {
+                const dataViews = sortedMonthLabels.map(monthLabel => {
                     const key = `${monthLabel}_Total`;
                     if (globalChartType === 'avg') {
-                        return Math.floor(programTotalSum['Total'] / numMonths);
+                        return Math.floor(programTotalSum['Total'] ? (programTotalSum['Total'].views / numMonths) : 0);
                     }
-                    return Math.floor(aggregatedMonth[key] || 0);
+                    const item = aggregatedMonth[key];
+                    return Math.floor(item ? item.views : 0);
+                });
+                const dataReach = sortedMonthLabels.map(monthLabel => {
+                    const key = `${monthLabel}_Total`;
+                    if (globalChartType === 'avg') {
+                        return Math.floor(programTotalSum['Total'] ? (programTotalSum['Total'].reach / numMonths) : 0);
+                    }
+                    const item = aggregatedMonth[key];
+                    return Math.floor(item ? item.reach : 0);
                 });
 
-                const backgroundColors = sortedMonthLabels.map((_, i) => `hsla(${((i * 50) + 250) % 360}, 70%, 50%, 0.7)`);
-                const borderColors = sortedMonthLabels.map((_, i) => `hsl(${((i * 50) + 250) % 360}, 70%, 50%)`);
-
-                datasetsMonth = [{
-                    label: 'ผลรวมค่าสะสม',
-                    data: data,
-                    backgroundColor: backgroundColors,
-                    borderColor: borderColors,
-                    borderWidth: 1
-                }];
+                datasetsMonth = [
+                    {
+                        label: globalChartType === 'avg' ? 'ค่าเฉลี่ยจำนวนเครื่องรับชมสะสม' : 'จำนวนเครื่องรับชมสะสม',
+                        data: dataViews,
+                        backgroundColor: 'rgba(76, 175, 80, 0.7)',
+                        borderColor: '#4CAF50',
+                        borderWidth: 1,
+                        stack: 'Views'
+                    },
+                    {
+                        label: globalChartType === 'avg' ? 'ค่าเฉลี่ยจำนวนเครื่องที่เข้าถึง' : 'จำนวนเครื่องที่เข้าถึง',
+                        data: dataReach,
+                        backgroundColor: 'rgba(33, 150, 243, 0.7)',
+                        borderColor: '#2196F3',
+                        borderWidth: 1,
+                        stack: 'Reach'
+                    }
+                ];
             }
 
-            renderMonthlyBarChart(sortedMonthLabels, datasetsMonth, selectedPrograms.length > 0, globalChartType);
+            renderMonthlyBarChart(sortedMonthLabels, datasetsMonth, true, globalChartType);
 
             // 6. Stepped Time Series Chart (by Date and Time)
             const steppedContainer = document.getElementById('steppedChartContainer');
@@ -984,7 +1037,7 @@
                         backgroundColor: color,
                         borderWidth: 2,
                         fill: false,
-                        stepped: true,
+                        stepped: 'middle',
                         pointRadius: 4,
                         pointHoverRadius: 6,
                         spanGaps: true
@@ -1217,7 +1270,7 @@
             });
         }
 
-        function renderCategoryPieChart(labels, data, chartTitle, globalChartType = 'sum') {
+        function renderCategoryPieChart(labels, data, reachData, chartTitle, globalChartType = 'sum') {
             const ctx = document.getElementById('categoryPieChart').getContext('2d');
 
             if (chartCategoryInstance) {
@@ -1233,6 +1286,7 @@
                     labels: labels,
                     datasets: [{
                         data: data,
+                        reachData: reachData,
                         backgroundColor: backgroundColors,
                         borderWidth: 1
                     }]
@@ -1284,15 +1338,28 @@
                         },
                         tooltip: {
                             callbacks: {
+                                title: function (tooltipItems) {
+                                    return tooltipItems[0].label || '';
+                                },
                                 label: function (context) {
-                                    let label = context.label || '';
-                                    if (label) {
-                                        label += ': ';
+                                    const dataset = context.dataset;
+                                    const index = context.dataIndex;
+                                    const value = dataset.data[index] || 0;
+                                    const reachValue = dataset.reachData ? (dataset.reachData[index] || 0) : 0;
+
+                                    const total = context.chart._metasets[context.datasetIndex].total;
+                                    const percentage = total === 0 ? 0 : Math.round((value / total) * 100);
+
+                                    let totalReach = 0;
+                                    if (dataset.reachData) {
+                                        totalReach = dataset.reachData.reduce((a, b) => a + b, 0);
                                     }
-                                    if (context.parsed !== null) {
-                                        label += context.parsed.toLocaleString() + ' วิว';
-                                    }
-                                    return label;
+                                    const reachPercentage = totalReach === 0 ? 0 : Math.round((reachValue / totalReach) * 100);
+
+                                    return [
+                                        `จำนวนเครื่องรับชมสะสม: ${value.toLocaleString()} (${percentage}%)`,
+                                        `จำนวนเครื่องที่เข้าถึง: ${reachValue.toLocaleString()} (${reachPercentage}%)`
+                                    ];
                                 }
                             }
                         }
@@ -1346,7 +1413,7 @@
                     plugins: {
                         title: {
                             display: true,
-                            text: (globalChartType === 'avg' ? 'ค่าเฉลี่ยสะสม จำแนกตามเดือน' : 'ภาพรวมค่าสะสม จำแนกตามเดือน') + (isStacked ? ' (แยกตามรายการ)' : ''),
+                            text: globalChartType === 'avg' ? 'สรุปยอด Engagement เฉลี่ย: จำแนกตามเดือน' : 'สรุปยอด Engagement รวม: จำแนกตามเดือน',
                             font: { size: 16 }
                         },
                         datalabels: {
@@ -1366,7 +1433,7 @@
                             }
                         },
                         legend: {
-                            display: isStacked,
+                            display: true,
                             position: 'top',
                             labels: {
                                 usePointStyle: true,
@@ -1379,10 +1446,8 @@
                             callbacks: {
                                 label: function (context) {
                                     let label = context.dataset.label || '';
-                                    if (label && label !== 'ผลรวมค่าสะสม' && label !== 'ค่าเฉลี่ยสะสม') {
+                                    if (label) {
                                         label += ': ';
-                                    } else {
-                                        label = '';
                                     }
                                     if (context.parsed.y !== null) {
                                         label += context.parsed.y.toLocaleString();
