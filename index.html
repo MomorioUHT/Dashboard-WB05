@@ -128,7 +128,6 @@
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/crypto-js/4.1.1/crypto-js.min.js"></script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/choices.js/public/assets/styles/choices.min.css" />
     <script src="https://cdn.jsdelivr.net/npm/choices.js/public/assets/scripts/choices.min.js"></script>
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/virtual-select-plugin@1.0.44/dist/virtual-select.min.css">
@@ -251,11 +250,12 @@
         </div>
     </div>
 
-    <script src="environment.js"></script>
     <script>
         // Register datalabels but disable globally so it doesn't affect other charts
         Chart.register(ChartDataLabels);
         Chart.defaults.plugins.datalabels.display = false;
+
+        const API_URL = "https://script.google.com/macros/s/AKfycbz_MDI-nepBbwQWjIVkCxs9LvQ6NsE-mxsBthEBzZg7EXsO-Cwnct5I-ylYg4oQtk6J/exec";
 
         let globalData = [];
         let choicesInstances = {};
@@ -271,41 +271,25 @@
         document.getElementById('globalChartTypeSelect').addEventListener('change', applyFilters);
 
         function loadData() {
-            const password = "thaipbs2026";
-
-            let sheetId, sheetName;
-            try {
-                sheetId = CryptoJS.AES.decrypt(ENV.ENCRYPTED_SHEET_ID, password).toString(CryptoJS.enc.Utf8);
-                sheetName = CryptoJS.AES.decrypt(ENV.ENCRYPTED_SHEET_NAME, password).toString(CryptoJS.enc.Utf8);
-
-                if (!sheetId || !sheetName) throw new Error("รหัสผ่านไม่ถูกต้อง");
-            } catch (e) {
-                alert("รหัสผ่านสำหรับ Decrypt ไม่ถูกต้อง กรุณาแก้ไขรหัสผ่านที่ถูก Hardcode ไว้ในไฟล์ index.html");
-                return;
-            }
-
             document.getElementById('full-page-loader').style.display = 'flex';
 
-            const url = `https://docs.google.com/spreadsheets/d/${sheetId}/gviz/tq?tqx=out:json&sheet=${encodeURIComponent(sheetName)}`;
-
-            fetch(url)
-                .then(response => response.text())
-                .then(text => {
-                    const jsonString = text.match(/google\.visualization\.Query\.setResponse\(([\s\S\w]+)\);/)[1];
-                    const safeJsonString = jsonString.replace(/new Date\((.*?)\)/g, '"Date($1)"');
-                    const data = JSON.parse(safeJsonString);
-
-                    if (data.table) {
-                        preprocessingData(data.table);
+            fetch(API_URL)
+                .then(response => {
+                    if (!response.ok) throw new Error('HTTP ' + response.status);
+                    return response.json();
+                })
+                .then(rows => {
+                    if (!Array.isArray(rows) || rows.length === 0) {
+                        throw new Error('API ไม่ส่งข้อมูลกลับมา หรือรูปแบบไม่ถูกต้อง');
                     }
+                    preprocessingData(rows);
                 })
                 .catch(error => {
                     console.error('Error:', error);
                     document.getElementById('full-page-loader').style.display = 'none';
                     document.getElementById('dashboard-content').style.display = 'block';
-                    document.getElementById('error-message').innerText = 'เกิดข้อผิดพลาดในการโหลดข้อมูล ตรวจสอบ Sheet ID และการตั้งค่า Public';
+                    document.getElementById('error-message').innerText = 'เกิดข้อผิดพลาดในการโหลดข้อมูลจาก API: ' + error.message;
                     document.getElementById('error-message').style.display = 'block';
-                    alert('เกิดข้อผิดพลาดในการโหลดข้อมูล: โปรดตรวจสอบ Sheet ID หรือสิทธิ์การเข้าถึงไฟล์');
                 });
         }
 
@@ -314,113 +298,72 @@
         });
 
 
-        function preprocessingData(table) {
-            let dateColIdx = -1;
-            let timeStrColIdx = -1;
-            let valColIdx = -1;
-            let valReachColIdx = -1;
-
-            let wkdayColIdx = -1;
-            let programColIdx = -1;
-            let categoryColIdx = -1;
-            let agencyColIdx = -1;
-
-            table.cols.forEach((col, idx) => {
-                if (col.label === 'DD/MM/YYYY') dateColIdx = idx;
-                if (col.label === 'Time') timeStrColIdx = idx;
-                if (col.label === 'จำนวนเครื่องรับชมสะสม10นาที') valColIdx = idx;
-                if (col.label === 'จำนวนเครื่องรวม(เข้าถึง)') valReachColIdx = idx;
-
-                if (col.label === 'WKDAY / WKEND') wkdayColIdx = idx;
-                if (col.label === 'รายการ') programColIdx = idx;
-                if (col.label === 'ประเภท') categoryColIdx = idx;
-                if (col.label === 'หน่วยงาน') agencyColIdx = idx;
-            });
-
-            // Fallback
-            if (dateColIdx === -1) dateColIdx = 4;
-            if (timeStrColIdx === -1) timeStrColIdx = 10;
-            if (valColIdx === -1) valColIdx = 11;
-            if (valReachColIdx === -1) valReachColIdx = 12;
-            if (wkdayColIdx === -1) wkdayColIdx = 2;
-            if (programColIdx === -1) programColIdx = 5;
-            if (categoryColIdx === -1) categoryColIdx = 6;
-            if (agencyColIdx === -1) agencyColIdx = 7;
-
+        function preprocessingData(rows) {
             const processedData = [];
 
-            table.rows.forEach(row => {
-                const dateCell = row.c[dateColIdx];
-                const timeStrCell = row.c[timeStrColIdx];
-                const valCell = row.c[valColIdx];
-                const valReachCell = row.c[valReachColIdx];
+            rows.forEach(row => {
+                const val = row['จำนวนเครื่องรับชมสะสม10นาที'];
+                if (val == null) return;
 
-                const wkdayCell = row.c[wkdayColIdx];
-                const programCell = row.c[programColIdx];
-                const categoryCell = row.c[categoryColIdx];
-                const agencyCell = row.c[agencyColIdx];
+                let hourLabel = "Unknown";
+                let timeInterval = "Unknown";
+                let sortKey = 0;
 
-                if (valCell && valCell.v != null) {
-                    let hourLabel = "Unknown";
-                    let timeInterval = "Unknown";
-                    let sortKey = 0;
+                let dateLabel = "Unknown";
+                let dateSortKey = 0;
 
-                    let dateLabel = "Unknown";
-                    let dateSortKey = 0;
-
-                    // Date
-                    if (dateCell && typeof dateCell.v === 'string') {
-                        const dMatch = dateCell.v.match(/Date\((\d+),(\d+),(\d+)/);
-                        if (dMatch) {
-                            const yyyy = parseInt(dMatch[1], 10);
-                            const mm = parseInt(dMatch[2], 10);
-                            const dd = parseInt(dMatch[3], 10);
-                            dateLabel = `${dd.toString().padStart(2, '0')}/${(mm + 1).toString().padStart(2, '0')}/${yyyy}`;
-                            dateSortKey = new Date(yyyy, mm, dd).getTime();
-                        } else {
-                            dateLabel = dateCell.f || dateCell.v;
-                        }
+                const rawDate = row['DD/MM/YYYY'];
+                if (rawDate) {
+                    const d = new Date(rawDate);
+                    if (!isNaN(d.getTime())) {
+                        const shifted = new Date(d.getTime() + 7 * 60 * 60 * 1000);
+                        const yyyy = shifted.getUTCFullYear();
+                        const mm = shifted.getUTCMonth();
+                        const dd = shifted.getUTCDate();
+                        dateLabel = `${dd.toString().padStart(2, '0')}/${(mm + 1).toString().padStart(2, '0')}/${yyyy}`;
+                        dateSortKey = new Date(yyyy, mm, dd).getTime();
                     }
-
-                    // Time
-                    if (timeStrCell && typeof timeStrCell.v === 'string') {
-                        const tMatch = timeStrCell.v.match(/^(\d{2}):(\d{2}):\d{2}-(\d{2}):(\d{2}):\d{2}/);
-                        if (tMatch) {
-                            timeInterval = `${tMatch[1]}.${tMatch[2]}-${tMatch[3]}.${tMatch[4]}`;
-
-                            const hr = tMatch[1];
-                            const nextHr = hr === "23" ? "00" : (parseInt(hr, 10) + 1).toString().padStart(2, '0');
-                            hourLabel = `${hr}.00-${nextHr}.00 น.`;
-
-                            sortKey = parseInt(tMatch[1], 10) * 60 + parseInt(tMatch[2], 10);
-                        } else {
-                            timeInterval = timeStrCell.v;
-                        }
-                    }
-                    let dayOfWeek = "Unknown";
-                    if (dateSortKey > 0) {
-                        const daysMap = ['อาทิตย์', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์'];
-                        dayOfWeek = daysMap[new Date(dateSortKey).getDay()];
-                    }
-
-                    processedData.push({
-                        y: valCell.v,
-                        reach: valReachCell ? valReachCell.v : null,
-
-                        wkday: wkdayCell ? (wkdayCell.f || wkdayCell.v) : 'Unknown',
-                        dayOfWeek: dayOfWeek,
-                        program: programCell ? (programCell.f || programCell.v) : 'Unknown',
-                        category: categoryCell ? (categoryCell.f || categoryCell.v) : 'Unknown',
-                        agency: agencyCell ? (agencyCell.f || agencyCell.v) : 'Unknown',
-                        hour: hourLabel,
-
-                        time_interval: timeInterval,
-                        sortKey: sortKey,
-
-                        date: dateLabel,
-                        dateSortKey: dateSortKey
-                    });
                 }
+
+                const timeRaw = row['Time'];
+                if (typeof timeRaw === 'string') {
+                    const tMatch = timeRaw.match(/^(\d{2}):(\d{2}):\d{2}-(\d{2}):(\d{2}):\d{2}/);
+                    if (tMatch) {
+                        timeInterval = `${tMatch[1]}.${tMatch[2]}-${tMatch[3]}.${tMatch[4]}`;
+
+                        const hr = tMatch[1];
+                        const nextHr = hr === "23" ? "00" : (parseInt(hr, 10) + 1).toString().padStart(2, '0');
+                        hourLabel = `${hr}.00-${nextHr}.00 น.`;
+
+                        sortKey = parseInt(tMatch[1], 10) * 60 + parseInt(tMatch[2], 10);
+                    } else if (timeRaw) {
+                        timeInterval = timeRaw;
+                    }
+                }
+
+                let dayOfWeek = "Unknown";
+                if (dateSortKey > 0) {
+                    const daysMap = ['อาทิตย์', 'จันทร์', 'อังคาร', 'พุธ', 'พฤหัสบดี', 'ศุกร์', 'เสาร์'];
+                    dayOfWeek = daysMap[new Date(dateSortKey).getDay()];
+                }
+
+                processedData.push({
+                    y: val,
+                    reach: row['จำนวนเครื่องรวม(เข้าถึง)'] != null ? row['จำนวนเครื่องรวม(เข้าถึง)'] : null,
+
+                    wkday: row['WKDAY / WKEND'] || 'Unknown',
+                    dayOfWeek: dayOfWeek,
+                    program: row['รายการ'] || 'Unknown',
+                    category: row['ประเภท'] || 'Unknown',
+                    agency: row['หน่วยงาน'] || 'Unknown',
+                    hour: hourLabel,
+
+                    time_interval: timeInterval,
+                    sortKey: sortKey,
+
+                    date: dateLabel,
+                    dateSortKey: dateSortKey
+                });
             });
 
             globalData = processedData;
@@ -1332,7 +1275,7 @@
 
                                     const totalMinutes = countValue * 10;
                                     const totalHoursFloat = totalMinutes / 60;
-                                    
+
                                     const months = Math.floor(totalMinutes / (30 * 24 * 60));
                                     let remainingMinutes = totalMinutes % (30 * 24 * 60);
 
@@ -1348,7 +1291,7 @@
                                     if (hours > 0) durationParts.push(`${hours} ชั่วโมง`);
                                     if (minutes > 0) durationParts.push(`${minutes} นาที`);
                                     const durationStr = durationParts.length > 0 ? durationParts.join(' ') : '0 นาที';
-                                    
+
                                     let formattedTotalHours = totalHoursFloat % 1 === 0 ? totalHoursFloat : totalHoursFloat.toFixed(1);
 
                                     return [
